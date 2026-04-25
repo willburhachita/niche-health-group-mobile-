@@ -1,5 +1,8 @@
 # Learn more https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files
 
+# Windsurf/AI agent files (contains symlinks, exclude from builds)
+.agents/
+
 # dependencies
 node_modules/
 
