@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -9,12 +9,28 @@ import { AppText } from '../../components/common/AppText';
 import { useAlert } from '../../components/common/CustomAlert';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
-import { getStockItemById, INCREASE_REASONS, DECREASE_REASONS } from '../../data/mockStock';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
+
+const INCREASE_REASONS = [
+  { key: 'purchase', label: 'Purchase' },
+  { key: 'returned', label: 'Returned' },
+  { key: 'other_increase', label: 'Other' },
+];
+const DECREASE_REASONS = [
+  { key: 'damaged', label: 'Damaged' },
+  { key: 'out_of_date', label: 'Out of Date' },
+  { key: 'used', label: 'Used' },
+  { key: 'other_decrease', label: 'Other' },
+];
 
 export default function StockAdjustmentScreen({ route, navigation }) {
   const alert = useAlert();
+  const { currentAccount } = useAuth();
   const { stockItemId } = route.params;
-  const item = getStockItemById(stockItemId);
+  const item = useQuery(api.stock.get, { id: stockItemId });
+  const adjustStock = useMutation(api.stock.adjust);
 
   const [adjustmentType, setAdjustmentType] = useState('increase');
   const [reason, setReason] = useState(null);
@@ -39,19 +55,30 @@ export default function StockAdjustmentScreen({ route, navigation }) {
   const newLevel = adjustmentType === 'increase' ? item.stockLevel + qty : item.stockLevel - qty;
   const isValid = reason && qty > 0 && newLevel >= 0;
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!isValid) {
       alert({ type: 'warning', title: 'Invalid', message: adjustmentType === 'decrease' && newLevel < 0 ? 'Cannot decrease below zero.' : 'Please fill in all required fields.' });
       return;
     }
-    const reasonLabel = reasons.find(r => r.key === reason)?.label || reason;
-    alert({
-      type: 'success',
-      title: 'Stock Adjusted',
-      message: `${item.name}\n${adjustmentType === 'increase' ? '+' : '-'}${qty} (${reasonLabel})\n${item.stockLevel} → ${newLevel}`,
-      buttons: [{ label: 'OK', onPress: () => navigation.goBack() }],
+    try {
+      await adjustStock({
+        stockItemId,
+        adjustmentType,
+        quantity: qty,
+        reason,
+        notes: notes || undefined,
+        adjustedBy: currentAccount?.userId || 'unknown',
+      });
+      const reasonLabel = reasons.find(r => r.key === reason)?.label || reason;
+      alert({
+        type: 'success',
+        title: 'Stock Adjusted',
+        message: `${item.name}\n${adjustmentType === 'increase' ? '+' : '-'}${qty} (${reasonLabel})\n${item.stockLevel} \u2192 ${newLevel}`,
+        buttons: [{ label: 'OK', onPress: () => navigation.goBack() }],
+      });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to adjust stock.' });
     }
-    );
   };
 
   return (
@@ -64,6 +91,7 @@ export default function StockAdjustmentScreen({ route, navigation }) {
         <View style={{ width: 24 }} />
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
         {/* Item Info */}
         <View style={styles.itemInfo}>
@@ -139,6 +167,7 @@ export default function StockAdjustmentScreen({ route, navigation }) {
           <Button label="Save Adjustment" onPress={handleSave} disabled={!isValid} />
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

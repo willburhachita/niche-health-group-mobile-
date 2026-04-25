@@ -1,19 +1,15 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { EmptyState } from '../../components/common/EmptyState';
 import { AppointmentCard } from '../../components/clinic/AppointmentCard';
-import {
-  getTodaysAppointments,
-  getUpcomingAppointments,
-  getPastAppointments,
-  getAppointmentsForDate,
-} from '../../data/mockAppointments';
 import { formatDateShort } from '../../utils/dateHelpers';
 
 const FILTERS = ['Today', 'Upcoming', 'Past'];
@@ -22,16 +18,28 @@ export default function AppointmentsListScreen({ navigation }) {
   const [activeFilter, setActiveFilter] = useState('Today');
   const [selectedDate, setSelectedDate] = useState(new Date());
 
-  const getFilteredAppointments = () => {
-    switch (activeFilter) {
-      case 'Today': return getTodaysAppointments();
-      case 'Upcoming': return getUpcomingAppointments();
-      case 'Past': return getPastAppointments();
-      default: return getTodaysAppointments();
-    }
-  };
+  const todayStart = useMemo(() => { const d = new Date(selectedDate); d.setHours(0,0,0,0); return d.getTime(); }, [selectedDate]);
+  const todayEnd = todayStart + 86400000;
+  const now = useMemo(() => Date.now(), []);
 
-  const appointments = getFilteredAppointments();
+  const todayAppts = useQuery(api.appointments.listByDateRange, { startFrom: todayStart, startTo: todayEnd });
+  const upcomingAppts = useQuery(api.appointments.listUpcoming, { limit: 50 });
+  const allPatients = useQuery(api.patients.list, {});
+
+  const patientMap = useMemo(() => {
+    const map = {};
+    (allPatients ?? []).forEach(p => { map[p._id] = p; });
+    return map;
+  }, [allPatients]);
+
+  const appointments = useMemo(() => {
+    switch (activeFilter) {
+      case 'Today': return todayAppts ?? [];
+      case 'Upcoming': return (upcomingAppts ?? []).filter(a => a.startTime > now);
+      case 'Past': return (todayAppts ?? []).filter(a => a.status === 'completed' || a.startTime < now);
+      default: return todayAppts ?? [];
+    }
+  }, [activeFilter, todayAppts, upcomingAppts, now]);
 
   const navigateDay = (direction) => {
     const newDate = new Date(selectedDate);
@@ -86,11 +94,12 @@ export default function AppointmentsListScreen({ navigation }) {
       {/* Appointments List */}
       <FlatList
         data={appointments}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={({ item }) => (
           <AppointmentCard
             appointment={item}
-            onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: item.id })}
+            patient={item.patientId ? patientMap[item.patientId] : null}
+            onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: item._id })}
           />
         )}
         contentContainerStyle={{ paddingBottom: TAB_BAR_HEIGHT, paddingTop: spacing.sm }}

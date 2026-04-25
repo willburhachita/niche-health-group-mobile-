@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -10,7 +12,6 @@ import { SearchBar } from '../../components/common/SearchBar';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Divider } from '../../components/common/Divider';
 import { PatientCard } from '../../components/clinic/PatientCard';
-import { mockPatients, searchPatients } from '../../data/mockPatients';
 
 const FILTERS = ['All', 'Active', 'Dialysis', 'Recent'];
 
@@ -18,31 +19,32 @@ export default function PatientDirectoryScreen({ navigation }) {
   const [query, setQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('All');
 
-  const getFilteredPatients = () => {
-    let patients = query.length > 0 ? searchPatients(query) : [...mockPatients];
+  const searchResults = useQuery(api.patients.search, { query: query });
+  const allPatients = useQuery(api.patients.list, {});
+
+  const patients = useMemo(() => {
+    let list = query.length > 0 ? (searchResults ?? []) : (allPatients ?? []);
 
     switch (activeFilter) {
       case 'Active':
-        patients = patients.filter(p => p.status === 'active');
+        list = list.filter(p => p.status === 'active');
         break;
       case 'Dialysis':
-        patients = patients.filter(p => p.department === 'Dialysis');
+        list = list.filter(p => p.department === 'Dialysis');
         break;
       case 'Recent':
-        patients = patients
+        list = list
           .filter(p => p.status === 'active')
-          .sort((a, b) => b.lastVisit - a.lastVisit);
+          .sort((a, b) => (b.lastVisit ?? 0) - (a.lastVisit ?? 0));
         break;
     }
 
-    return patients;
-  };
-
-  const patients = getFilteredPatients();
+    return list;
+  }, [searchResults, allPatients, activeFilter, query]);
 
   // Group by first letter
   const grouped = patients.reduce((acc, p) => {
-    const letter = p.lastName[0].toUpperCase();
+    const letter = (p.lastName?.[0] ?? '?').toUpperCase();
     if (!acc[letter]) acc[letter] = [];
     acc[letter].push(p);
     return acc;
@@ -55,7 +57,7 @@ export default function PatientDirectoryScreen({ navigation }) {
 
   const flatData = sections.flatMap(s => [
     { type: 'header', letter: s.letter, id: `header-${s.letter}` },
-    ...s.patients.map(p => ({ type: 'patient', ...p })),
+    ...s.patients.map(p => ({ type: 'patient', id: p._id, ...p })),
   ]);
 
   return (
@@ -107,7 +109,7 @@ export default function PatientDirectoryScreen({ navigation }) {
             <>
               <PatientCard
                 patient={item}
-                onPress={() => navigation.navigate('PatientProfile', { patientId: item.id })}
+                onPress={() => navigation.navigate('PatientProfile', { patientId: item._id })}
               />
               <Divider type="inset" />
             </>

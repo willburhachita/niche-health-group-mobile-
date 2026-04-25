@@ -14,10 +14,7 @@ import { Card } from '../../components/common/Card';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { ConversationItem } from '../../components/chat/ConversationItem';
 import { useAuth } from '../../hooks/useAuth';
-import { mockSchedule } from '../../data/mockSchedule';
 import { formatTimestamp, formatTime } from '../../utils/dateHelpers';
-import { getTodaysAppointments, getPendingAppointmentsCount } from '../../data/mockAppointments';
-import { getPatientById } from '../../data/mockPatients';
 
 export default function HomeScreen({ navigation }) {
   const { currentAccount } = useAuth();
@@ -30,16 +27,9 @@ export default function HomeScreen({ navigation }) {
   const currentUserId = currentAccount?.userId;
   const isAdmin = currentAccount?.role === 'admin';
 
-  const clinicAppointments = getTodaysAppointments().filter(a => a.status !== 'open');
-  const pendingApts = getPendingAppointmentsCount();
-  const nextAppointment = clinicAppointments.find(a => a.startTime > Date.now() && a.status !== 'completed');
-  const nextPatient = nextAppointment?.patientId ? getPatientById(nextAppointment.patientId) : null;
-
-  const todayEvents = mockSchedule.filter(e => {
-    const d = new Date(e.startTime);
-    const t = new Date();
-    return d.toDateString() === t.toDateString();
-  });
+  const todayStats = useQuery(api.appointments.todayStats) ?? { total: 0, pending: 0, confirmed: 0, arrived: 0, completed: 0 };
+  const nextAppointment = useQuery(api.appointments.nextAppointmentToday);
+  const todayEvents = useQuery(api.scheduleEvents.listByDate, { date: Date.now() }) ?? [];
 
   const recentConvos = [...conversations]
     .filter(c => c.lastMessageAt)
@@ -97,7 +87,7 @@ export default function HomeScreen({ navigation }) {
             <View style={{ flex: 1 }}>
               <AppText variant="bodyBold">Clinic</AppText>
               <AppText variant="caption" color={colors.darkGrey}>
-                {clinicAppointments.length} appointments today{pendingApts > 0 ? ` · ${pendingApts} pending` : ''}
+                {todayStats.total} appointments today{todayStats.pending > 0 ? ` · ${todayStats.pending} pending` : ''}{todayStats.arrived > 0 ? ` · ${todayStats.arrived} arrived` : ''}
               </AppText>
             </View>
           </View>
@@ -105,22 +95,24 @@ export default function HomeScreen({ navigation }) {
         </Pressable>
 
         {/* Next Appointment */}
-        {nextAppointment && nextPatient && (
+        {nextAppointment && (
           <View style={{ paddingHorizontal: spacing.base }}>
-            <Card onPress={() => navigation.navigate('MoreTab', { screen: 'AppointmentDetail', params: { appointmentId: nextAppointment.id } })}>
+            <Card onPress={() => navigation.navigate('MoreTab', { screen: 'AppointmentDetail', params: { appointmentId: nextAppointment._id } })}>
               <AppText variant="small" color={colors.mediumGrey} style={{ marginBottom: spacing.xs }}>NEXT APPOINTMENT</AppText>
               <View style={styles.nextAptRow}>
                 <View style={[styles.nextAptBar, { backgroundColor: colors.navyBlue }]} />
                 <View style={{ flex: 1 }}>
-                  <AppText variant="bodyBold">{nextPatient.displayName}</AppText>
-                  <AppText variant="caption" color={colors.darkGrey}>{nextAppointment.type}</AppText>
+                  <AppText variant="bodyBold">{nextAppointment.patientName || 'Patient'}</AppText>
+                  <AppText variant="caption" color={colors.darkGrey}>{nextAppointment.type || 'Appointment'}</AppText>
                   <AppText variant="small" color={colors.mediumGrey}>
                     {formatTime(nextAppointment.startTime)}{nextAppointment.location ? ` · ${nextAppointment.location}` : ''}
                   </AppText>
                 </View>
                 <View style={styles.nextAptStatus}>
-                  <View style={[styles.nextAptDot, { backgroundColor: colors.success }]} />
-                  <AppText variant="small" color={colors.success}>Confirmed</AppText>
+                  <View style={[styles.nextAptDot, { backgroundColor: nextAppointment.status === 'arrived' ? colors.success : colors.warning }]} />
+                  <AppText variant="small" color={nextAppointment.status === 'arrived' ? colors.success : colors.warning}>
+                    {nextAppointment.status === 'arrived' ? 'Arrived' : 'Pending'}
+                  </AppText>
                 </View>
               </View>
             </Card>

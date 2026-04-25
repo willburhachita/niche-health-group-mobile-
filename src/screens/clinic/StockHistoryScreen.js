@@ -1,31 +1,30 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
-import { getStockItemById, getAdjustmentsForItem } from '../../data/mockStock';
-import { getUserById } from '../../data/mockUsers';
 import { formatTimestamp } from '../../utils/dateHelpers';
 
 const FILTERS = ['All', 'Increases', 'Decreases'];
 
 export default function StockHistoryScreen({ route, navigation }) {
   const { stockItemId } = route.params;
-  const item = getStockItemById(stockItemId);
+  const item = useQuery(api.stock.get, { id: stockItemId });
   const [filter, setFilter] = useState('All');
 
-  const allAdj = item ? getAdjustmentsForItem(item.id) : [];
-  const adjustments = filter === 'Increases'
-    ? allAdj.filter(a => a.adjustmentType === 'increase')
-    : filter === 'Decreases'
-      ? allAdj.filter(a => a.adjustmentType === 'decrease')
-      : allAdj;
+  const allAdj = useQuery(api.stock.listAdjustments, { stockItemId }) ?? [];
+  const adjustments = useMemo(() => {
+    if (filter === 'Increases') return allAdj.filter(a => a.adjustmentType === 'increase');
+    if (filter === 'Decreases') return allAdj.filter(a => a.adjustmentType === 'decrease');
+    return allAdj;
+  }, [allAdj, filter]);
 
   const renderItem = ({ item: adj }) => {
-    const user = getUserById(adj.adjustedBy);
     const isIncrease = adj.adjustmentType === 'increase';
     return (
       <View style={styles.adjCard}>
@@ -40,7 +39,7 @@ export default function StockHistoryScreen({ route, navigation }) {
           <AppText variant="body" color={colors.darkGrey}>{adj.reason.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}</AppText>
           {adj.notes && <AppText variant="small" color={colors.mediumGrey} numberOfLines={2}>{adj.notes}</AppText>}
           <AppText variant="small" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
-            {user?.displayName || 'Unknown'} · {formatTimestamp(adj.adjustedAt)}
+            {adj.adjustedBy || 'Unknown'} · {formatTimestamp(adj.adjustedAt)}
           </AppText>
         </View>
       </View>
@@ -74,7 +73,7 @@ export default function StockHistoryScreen({ route, navigation }) {
 
       <FlatList
         data={adjustments}
-        keyExtractor={adj => adj.id}
+        keyExtractor={adj => adj._id}
         renderItem={renderItem}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: TAB_BAR_HEIGHT }}
         ListEmptyComponent={<AppText variant="body" color={colors.mediumGrey} style={{ padding: spacing.xl, textAlign: 'center' }}>No adjustments recorded</AppText>}

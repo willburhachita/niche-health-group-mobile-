@@ -7,15 +7,29 @@ import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { Divider } from '../../components/common/Divider';
-import { getExpenseById, getCategoryLabel, getCategoryIcon, getCategoryColor } from '../../data/mockExpenses';
-import { formatCurrency } from '../../data/mockInvoices';
-import { getUserById } from '../../data/mockUsers';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { formatDate, formatTimestamp } from '../../utils/dateHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+const EXPENSE_CATEGORIES = [
+  { key: 'medical_supplies', label: 'Medical Supplies', icon: 'heart', color: colors.error },
+  { key: 'equipment', label: 'Equipment', icon: 'tool', color: colors.navyBlue },
+  { key: 'utilities', label: 'Utilities', icon: 'zap', color: colors.warning },
+  { key: 'rent', label: 'Rent', icon: 'home', color: colors.peach },
+  { key: 'salaries', label: 'Salaries', icon: 'users', color: colors.success },
+  { key: 'other', label: 'Other', icon: 'more-horizontal', color: colors.mediumGrey },
+];
+function getCategoryLabel(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.label || key; }
+function getCategoryIcon(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.icon || 'more-horizontal'; }
+function getCategoryColor(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.color || colors.mediumGrey; }
 
 export default function ExpenseDetailScreen({ route, navigation }) {
   const { expenseId } = route.params;
-  const expense = getExpenseById(expenseId);
-  const createdByUser = expense ? getUserById(expense.createdBy) : null;
+  const expense = useQuery(api.expenses.get, { id: expenseId });
 
   if (!expense) {
     return (
@@ -73,11 +87,11 @@ export default function ExpenseDetailScreen({ route, navigation }) {
           </>
         )}
 
-        {expense.attachments.length > 0 && (
+        {(expense.attachments?.length ?? 0) > 0 && (
           <>
             <Divider type="section" />
             <View style={styles.section}>
-              <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>ATTACHMENTS ({expense.attachments.length})</AppText>
+              <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>ATTACHMENTS ({expense.attachments?.length})</AppText>
               {expense.attachments.map((att, i) => (
                 <View key={i} style={styles.attachRow}>
                   <Feather name="paperclip" size={14} color={colors.navyBlue} />
@@ -92,7 +106,7 @@ export default function ExpenseDetailScreen({ route, navigation }) {
         <Divider type="section" />
         <View style={styles.section}>
           <AppText variant="small" color={colors.mediumGrey}>
-            Recorded by {createdByUser?.displayName || 'Unknown'} · {formatTimestamp(expense.createdAt)}
+            Recorded by {expense.createdBy || 'Unknown'} · {formatTimestamp(expense.createdAt)}
           </AppText>
         </View>
       </ScrollView>

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -9,11 +9,33 @@ import { AppText } from '../../components/common/AppText';
 import { useAlert } from '../../components/common/CustomAlert';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
-import { EXPENSE_CATEGORIES, getCategoryIcon, getCategoryColor } from '../../data/mockExpenses';
-import { PAYMENT_METHODS } from '../../data/mockPayments';
+import { useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
+
+const EXPENSE_CATEGORIES = [
+  { key: 'medical_supplies', label: 'Medical Supplies', icon: 'heart', color: colors.error },
+  { key: 'equipment', label: 'Equipment', icon: 'tool', color: colors.navyBlue },
+  { key: 'utilities', label: 'Utilities', icon: 'zap', color: colors.warning },
+  { key: 'rent', label: 'Rent', icon: 'home', color: colors.peach },
+  { key: 'salaries', label: 'Salaries', icon: 'users', color: colors.success },
+  { key: 'other', label: 'Other', icon: 'more-horizontal', color: colors.mediumGrey },
+];
+function getCategoryIcon(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.icon || 'more-horizontal'; }
+function getCategoryColor(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.color || colors.mediumGrey; }
+
+const PAYMENT_METHODS = [
+  { key: 'cash', label: 'Cash', icon: 'dollar-sign' },
+  { key: 'mobile_money', label: 'Mobile Money', icon: 'smartphone' },
+  { key: 'card', label: 'Card', icon: 'credit-card' },
+  { key: 'bank_transfer', label: 'Bank Transfer', icon: 'briefcase' },
+  { key: 'cheque', label: 'Cheque', icon: 'file-text' },
+];
 
 export default function CreateExpenseScreen({ navigation }) {
   const alert = useAlert();
+  const { currentAccount } = useAuth();
+  const createExpense = useMutation(api.expenses.create);
   const [description, setDescription] = useState('');
   const [amount, setAmount] = useState('');
   const [category, setCategory] = useState(null);
@@ -32,12 +54,27 @@ export default function CreateExpenseScreen({ navigation }) {
     setAttachments(attachments.filter((_, i) => i !== index));
   };
 
-  const handleSave = () => {
+  const handleSave = async () => {
     if (!description.trim() || !amount || !category) {
       alert({ type: 'warning', title: 'Required', message: 'Please fill in description, amount, and category.' });
       return;
     }
-    alert({ type: 'success', title: 'Expense Recorded', message: `${description} — K ${amount}`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
+    try {
+      await createExpense({
+        description: description.trim(),
+        amount: parseFloat(amount) || 0,
+        category,
+        date: Date.now(),
+        vendorName: vendorName || undefined,
+        paymentMethod: paymentMethod || undefined,
+        referenceNumber: referenceNumber || undefined,
+        notes: notes || undefined,
+        createdBy: currentAccount?.userId || 'unknown',
+      });
+      alert({ type: 'success', title: 'Expense Recorded', message: `${description} \u2014 K ${amount}`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to save expense.' });
+    }
   };
 
   return (
@@ -50,6 +87,7 @@ export default function CreateExpenseScreen({ navigation }) {
         <View style={{ width: 24 }} />
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
         <Input label="Description" value={description} onChangeText={setDescription} placeholder="What was this expense for?" />
         <Input label="Amount (K)" value={amount} onChangeText={setAmount} placeholder="0.00" keyboardType="numeric" />
@@ -111,6 +149,7 @@ export default function CreateExpenseScreen({ navigation }) {
           <AppText variant="body" color={colors.mediumGrey}>Cancel</AppText>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

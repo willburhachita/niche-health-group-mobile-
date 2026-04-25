@@ -2,6 +2,8 @@ import React from 'react';
 import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -10,10 +12,11 @@ import { AppText } from '../../components/common/AppText';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Divider } from '../../components/common/Divider';
-import { getStockItemById, getAdjustmentsForItem, formatCurrency } from '../../data/mockStock';
-import { getSupplierById } from '../../data/mockSuppliers';
-import { getUserById } from '../../data/mockUsers';
 import { formatDate, formatTimestamp } from '../../utils/dateHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 function getStockColor(item) {
   if (item.stockLevel === 0) return colors.error;
@@ -45,11 +48,9 @@ function getTaxLabel(item) {
 
 export default function StockItemDetailScreen({ route, navigation }) {
   const { stockItemId } = route.params;
-  const item = getStockItemById(stockItemId);
-  const supplier = item ? getSupplierById(item.supplierId) : null;
-  const adjustments = item ? getAdjustmentsForItem(item.id).slice(0, 5) : [];
-  const createdByUser = item ? getUserById(item.createdBy) : null;
-  const updatedByUser = item?.updatedBy ? getUserById(item.updatedBy) : null;
+  const item = useQuery(api.stock.get, { id: stockItemId });
+  const supplier = useQuery(api.suppliers.get, item?.supplierId ? { id: item.supplierId } : 'skip');
+  const adjustments = useQuery(api.stock.listAdjustments, item ? { stockItemId: item._id } : 'skip') ?? [];
 
   if (!item) {
     return (
@@ -76,7 +77,7 @@ export default function StockItemDetailScreen({ route, navigation }) {
           <Feather name="chevron-left" size={24} color={colors.black} />
         </Pressable>
         <AppText variant="h2" style={styles.headerTitle}>{item.itemCode}</AppText>
-        <Pressable onPress={() => navigation.navigate('CreateEditProduct', { stockItemId: item.id })} hitSlop={8}>
+        <Pressable onPress={() => navigation.navigate('CreateEditProduct', { stockItemId: item._id })} hitSlop={8}>
           <Feather name="edit-2" size={20} color={colors.navyBlue} />
         </Pressable>
       </View>
@@ -127,7 +128,7 @@ export default function StockItemDetailScreen({ route, navigation }) {
         <View style={styles.section}>
           <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>SUPPLIER</AppText>
           {supplier ? (
-            <Pressable style={styles.supplierCard} onPress={() => navigation.navigate('SupplierDetail', { supplierId: supplier.id })}>
+            <Pressable style={styles.supplierCard} onPress={() => navigation.navigate('SupplierDetail', { supplierId: supplier._id })}>
               <View style={styles.supplierIcon}>
                 <Feather name="truck" size={16} color={colors.navyBlue} />
               </View>
@@ -175,11 +176,11 @@ export default function StockItemDetailScreen({ route, navigation }) {
         <View style={styles.section}>
           <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>AUDIT</AppText>
           <AppText variant="small" color={colors.mediumGrey}>
-            Added by {createdByUser?.displayName || 'Unknown'} · {formatTimestamp(item.createdAt)}
+            Added by {item.createdBy || 'Unknown'} · {formatTimestamp(item.createdAt)}
           </AppText>
-          {updatedByUser && (
+          {item.updatedBy && (
             <AppText variant="small" color={colors.mediumGrey} style={{ marginTop: 2 }}>
-              Last updated by {updatedByUser.displayName} · {formatTimestamp(item.updatedAt)}
+              Last updated by {item.updatedBy} · {formatTimestamp(item.updatedAt)}
             </AppText>
           )}
         </View>
@@ -191,7 +192,7 @@ export default function StockItemDetailScreen({ route, navigation }) {
           <View style={styles.sectionHeaderRow}>
             <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>RECENT ADJUSTMENTS</AppText>
             {adjustments.length > 0 && (
-              <Pressable onPress={() => navigation.navigate('StockHistory', { stockItemId: item.id })}>
+              <Pressable onPress={() => navigation.navigate('StockHistory', { stockItemId: item._id })}>
                 <AppText variant="small" color={colors.navyBlue}>View All</AppText>
               </Pressable>
             )}
@@ -199,17 +200,16 @@ export default function StockItemDetailScreen({ route, navigation }) {
           {adjustments.length === 0 ? (
             <AppText variant="body" color={colors.mediumGrey}>No adjustments yet</AppText>
           ) : (
-            adjustments.map(adj => {
-              const adjUser = getUserById(adj.adjustedBy);
+            adjustments.slice(0, 5).map(adj => {
               const isIncrease = adj.adjustmentType === 'increase';
               return (
-                <View key={adj.id} style={styles.adjRow}>
+                <View key={adj._id} style={styles.adjRow}>
                   <View style={[styles.adjIcon, { backgroundColor: isIncrease ? colors.success + '14' : colors.error + '14' }]}>
                     <Feather name={isIncrease ? 'arrow-up' : 'arrow-down'} size={14} color={isIncrease ? colors.success : colors.error} />
                   </View>
                   <View style={{ flex: 1 }}>
                     <AppText variant="body">{isIncrease ? '+' : '-'}{adj.quantity} · {adj.reason.replace(/_/g, ' ')}</AppText>
-                    <AppText variant="small" color={colors.mediumGrey}>{adjUser?.displayName} · {formatTimestamp(adj.adjustedAt)}</AppText>
+                    <AppText variant="small" color={colors.mediumGrey}>{adj.adjustedBy} · {formatTimestamp(adj.adjustedAt)}</AppText>
                   </View>
                   <AppText variant="caption" color={colors.darkGrey}>{adj.previousLevel} → {adj.newLevel}</AppText>
                 </View>
@@ -220,7 +220,7 @@ export default function StockItemDetailScreen({ route, navigation }) {
 
         {/* Action Buttons */}
         <View style={styles.actions}>
-          <Button label="Adjust Stock" icon="sliders" onPress={() => navigation.navigate('StockAdjustment', { stockItemId: item.id })} />
+          <Button label="Adjust Stock" icon="sliders" onPress={() => navigation.navigate('StockAdjustment', { stockItemId: item._id })} />
         </View>
       </ScrollView>
     </SafeAreaView>

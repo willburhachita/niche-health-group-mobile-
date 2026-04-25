@@ -21,8 +21,15 @@ export const getChannel = query({
   handler: async (ctx, { channelId }) => {
     console.log(`[CHAN] getChannel: ${channelId}`);
     const ch = await ctx.db.get(channelId);
-    console.log(`[CHAN] ${ch ? `✅ Found: ${ch.displayName} (${ch.memberCount} members)` : '❌ Not found'}`);
-    return ch;
+    if (!ch) {
+      console.log(`[CHAN] ❌ Not found`);
+      return null;
+    }
+    const allStaff = await ctx.db.query("staffAccounts").take(500);
+    const activeUserIds = new Set(allStaff.filter((a) => a.isActive).map((a) => a.userId));
+    const activeCount = ch.members.filter((m) => activeUserIds.has(m)).length;
+    console.log(`[CHAN] ✅ Found: ${ch.displayName} (${activeCount} active members)`);
+    return { ...ch, memberCount: activeCount };
   },
 });
 
@@ -35,7 +42,7 @@ export const getChannelMessages = query({
       .collect();
     console.log(`[CHAN] getChannelMessages for ${channelId}: returned ${msgs.length} messages`);
     return await Promise.all(msgs.map(async (msg) => {
-      if (msg.type === "voice" && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
+      if ((msg.type === "voice" || msg.type === "file" || msg.type === "image") && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
         const url = await ctx.storage.getUrl(msg.fileUrl as any);
         return { ...msg, fileUrl: url ?? msg.fileUrl };
       }

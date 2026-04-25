@@ -11,28 +11,46 @@ import { Card } from '../../components/common/Card';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { StatBar, RevenueBar } from '../../components/clinic/StatBar';
 import { Avatar } from '../../components/common/Avatar';
-import {
-  dailyRevenue,
-  monthlyStats,
-  weeklyStats,
-  appointmentsByType,
-  topProviders,
-  getMaxRevenue,
-} from '../../data/mockReportsData';
-import { formatCurrency } from '../../data/mockInvoices';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+// Static chart data — will be replaced with real aggregation queries in the future
+const dailyRevenue = [
+  { day: 'Mon', amount: 2400 },
+  { day: 'Tue', amount: 1800 },
+  { day: 'Wed', amount: 3200 },
+  { day: 'Thu', amount: 2900 },
+  { day: 'Fri', amount: 3600 },
+  { day: 'Today', amount: 1500 },
+];
+const appointmentsByType = [
+  { type: 'General Consultation', count: 0, percentage: 0, color: colors.navyBlue },
+  { type: 'Follow-up', count: 0, percentage: 0, color: colors.peach },
+  { type: 'Emergency', count: 0, percentage: 0, color: colors.error },
+  { type: 'Telehealth', count: 0, percentage: 0, color: colors.success },
+];
+const topProviders = [];
+function getMaxRevenue() {
+  return Math.max(...dailyRevenue.map(d => d.amount), 1);
+}
 
 const PERIODS = ['This Week', 'This Month'];
 
 export default function ReportsDashboardScreen({ navigation }) {
   const [period, setPeriod] = useState('This Month');
-  const stats = period === 'This Week' ? weeklyStats : monthlyStats;
+  const todayStats = useQuery(api.appointments.todayStats) ?? { total: 0, completed: 0, cancelled: 0, pending: 0 };
+  const outstanding = useQuery(api.invoices.outstandingTotal) ?? 0;
   const maxRev = getMaxRevenue();
 
   const STAT_CARDS = [
-    { label: 'Appointments', value: stats.totalAppointments, trend: stats.appointmentsTrend, icon: 'calendar', color: colors.navyBlue },
-    { label: 'Revenue', value: formatCurrency(stats.totalRevenue), trend: stats.revenueTrend, icon: 'credit-card', color: colors.peach },
-    { label: 'Patients Seen', value: stats.patientsSeen, trend: stats.patientsTrend, icon: 'users', color: colors.success },
-    { label: 'No-Shows', value: stats.noShows, trend: stats.noShowsTrend, icon: 'x-circle', color: stats.noShows > 0 ? colors.error : colors.success },
+    { label: 'Appointments', value: todayStats.total, trend: 0, icon: 'calendar', color: colors.navyBlue },
+    { label: 'Outstanding', value: formatCurrency(outstanding), trend: 0, icon: 'credit-card', color: colors.peach },
+    { label: 'Completed', value: todayStats.completed, trend: 0, icon: 'users', color: colors.success },
+    { label: 'Cancelled', value: todayStats.cancelled, trend: 0, icon: 'x-circle', color: todayStats.cancelled > 0 ? colors.error : colors.success },
   ];
 
   return (

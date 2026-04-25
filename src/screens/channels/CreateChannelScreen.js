@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -57,6 +57,7 @@ export default function CreateChannelScreen({ navigation }) {
         </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content}>
         <Input label="Channel Name" value={name} onChangeText={setName} placeholder="e.g. pharmacy-updates" icon="hash" />
         <Input label="Description" value={description} onChangeText={setDescription} placeholder="What is this channel about?" multiline icon="align-left" />
@@ -93,6 +94,7 @@ export default function CreateChannelScreen({ navigation }) {
           })}
         </View>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

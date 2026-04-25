@@ -1,38 +1,56 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { shadows } from '../../constants/shadows';
 import { AppText } from '../../components/common/AppText';
+import { useAuth } from '../../hooks/useAuth';
+import { useState } from 'react';
 import { useAlert } from '../../components/common/CustomAlert';
 import { Avatar } from '../../components/common/Avatar';
 import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Divider } from '../../components/common/Divider';
-import { getAppointmentById, APPOINTMENT_STATUSES } from '../../data/mockAppointments';
-import { getPatientById } from '../../data/mockPatients';
-import { getUserById } from '../../data/mockUsers';
 import { formatTime, formatDate } from '../../utils/dateHelpers';
 
 const statusColors = {
   confirmed: colors.success,
   pending: colors.warning,
+  arrived: colors.navyBlue,
   cancelled: colors.error,
   completed: colors.mediumGrey,
   noShow: colors.error,
-  open: colors.navyBlue,
+  open: colors.lightGrey,
+};
+
+const STATUS_LABELS = {
+  confirmed: 'Confirmed',
+  pending: 'Pending',
+  arrived: 'Patient Arrived',
+  cancelled: 'Cancelled',
+  completed: 'Completed',
+  noShow: 'No Show',
+  open: 'Open Slot',
 };
 
 export default function AppointmentDetailScreen({ route, navigation }) {
   const alert = useAlert();
   const { appointmentId } = route.params;
-  const appointment = getAppointmentById(appointmentId);
-  const patient = appointment?.patientId ? getPatientById(appointment.patientId) : null;
-  const provider = appointment?.providerId ? getUserById(appointment.providerId) : null;
-  const statusInfo = APPOINTMENT_STATUSES[appointment?.status] || {};
+  const { currentAccount } = useAuth();
+  const appointment = useQuery(api.appointments.get, { id: appointmentId });
+  const patient = useQuery(api.patients.get, appointment?.patientId ? { id: appointment.patientId } : 'skip');
+  const cancelMutation = useMutation(api.appointments.cancel);
+  const markArrivedMutation = useMutation(api.appointments.markArrived);
+  const completeAndDraftMutation = useMutation(api.appointments.completeAndDraft);
+  const [completing, setCompleting] = useState(false);
+  const [draftInvoiceId, setDraftInvoiceId] = useState(null);
+
+  const statusLabel = STATUS_LABELS[appointment?.status] || appointment?.status || '';
   const dotColor = statusColors[appointment?.status] || colors.mediumGrey;
 
   if (!appointment) {
@@ -50,7 +68,29 @@ export default function AppointmentDetailScreen({ route, navigation }) {
     );
   }
 
-  const isUpcoming = appointment.startTime > Date.now() && appointment.status !== 'completed' && appointment.status !== 'cancelled';
+  const isActive = appointment.status === 'confirmed' || appointment.status === 'pending';
+  const isArrived = appointment.status === 'arrived';
+  const isCompleted = appointment.status === 'completed';
+  const isCancellable = appointment.status !== 'completed' && appointment.status !== 'cancelled';
+
+  const handleMarkArrived = async () => {
+    await markArrivedMutation({ id: appointmentId });
+  };
+
+  const handleCompleteAndDraft = async () => {
+    setCompleting(true);
+    try {
+      const result = await completeAndDraftMutation({
+        id: appointmentId,
+        createdBy: currentAccount?.userId || 'unknown',
+      });
+      if (result?.invoiceId) setDraftInvoiceId(result.invoiceId);
+    } catch (e) {
+      alert({ type: 'error', title: 'Error', message: 'Could not complete appointment.' });
+    } finally {
+      setCompleting(false);
+    }
+  };
 
   const handleCancel = () => {
     alert({
@@ -59,7 +99,10 @@ export default function AppointmentDetailScreen({ route, navigation }) {
       message: 'Are you sure you want to cancel this appointment?',
       buttons: [
         { label: 'No', style: 'cancel' },
-        { label: 'Yes, Cancel', style: 'destructive', onPress: () => navigation.goBack() },
+        { label: 'Yes, Cancel', style: 'destructive', onPress: async () => {
+          await cancelMutation({ id: appointmentId });
+          navigation.goBack();
+        }},
       ],
     });
   };
@@ -78,19 +121,19 @@ export default function AppointmentDetailScreen({ route, navigation }) {
         {/* Status Banner */}
         <View style={[styles.statusBanner, { backgroundColor: dotColor + '14' }]}>
           <View style={[styles.statusDot, { backgroundColor: dotColor }]} />
-          <AppText variant="bodyBold" color={dotColor}>{statusInfo.label}</AppText>
+          <AppText variant="bodyBold" color={dotColor}>{statusLabel}</AppText>
         </View>
 
         {/* Patient Card */}
         {patient && (
           <Pressable
             style={styles.patientCard}
-            onPress={() => navigation.navigate('PatientProfile', { patientId: patient.id })}
+            onPress={() => navigation.navigate('PatientProfile', { patientId: patient._id })}
           >
             <Avatar name={patient.displayName} size={48} />
             <View style={styles.patientInfo}>
               <AppText variant="h3">{patient.displayName}</AppText>
-              <AppText variant="caption" color={colors.darkGrey}>{patient.patientId}</AppText>
+              <AppText variant="caption" color={colors.darkGrey}>{patient.patientCode}</AppText>
             </View>
             <Pressable style={styles.actionIcon} onPress={() => {}}>
               <Feather name="phone" size={18} color={colors.navyBlue} />
@@ -111,9 +154,9 @@ export default function AppointmentDetailScreen({ route, navigation }) {
               <Divider type="full" />
             </>
           )}
-          {provider && (
+          {appointment.providerId && (
             <>
-              <DetailRow icon="user" label="Provider" value={provider.displayName} />
+              <DetailRow icon="user" label="Provider" value={appointment.providerId} />
               <Divider type="full" />
             </>
           )}
@@ -156,27 +199,56 @@ export default function AppointmentDetailScreen({ route, navigation }) {
 
         {/* Actions */}
         <View style={styles.actions}>
-          {isUpcoming && (
+          {/* Step 1: Mark arrived (when pending/confirmed) */}
+          {isActive && (
+            <Button
+              label="Patient Arrived"
+              onPress={handleMarkArrived}
+            />
+          )}
+
+          {/* Step 2: Start consultation + complete (when arrived) */}
+          {isArrived && (
             <>
               <Button
                 label={appointment.type === 'Telehealth' ? 'Start Telehealth' : 'Start Consultation'}
                 onPress={() => {
                   if (appointment.type === 'Telehealth') {
-                    navigation.navigate('TelehealthCall', { appointmentId: appointment.id });
+                    navigation.navigate('TelehealthCall', { appointmentId });
                   } else {
-                    navigation.navigate('TreatmentNote', { patientId: appointment.patientId, appointmentId: appointment.id });
+                    navigation.navigate('TreatmentNote', { patientId: appointment.patientId, appointmentId });
                   }
                 }}
               />
-              <Button label="Reschedule" variant="secondary" onPress={() => navigation.navigate('BookAppointment', { appointmentId: appointment.id })} />
-              <Button label="Cancel Appointment" variant="destructive" onPress={handleCancel} />
+              <Button
+                label={completing ? 'Completing...' : 'Complete & Generate Invoice'}
+                variant="secondary"
+                disabled={completing}
+                onPress={handleCompleteAndDraft}
+              />
             </>
           )}
-          {appointment.status === 'completed' && (
-            <Button
-              label="View Treatment Notes"
-              onPress={() => navigation.navigate('TreatmentNote', { patientId: appointment.patientId })}
-            />
+
+          {/* Step 3: Completed — view notes + draft invoice */}
+          {isCompleted && (
+            <>
+              <Button
+                label="View Treatment Notes"
+                onPress={() => navigation.navigate('TreatmentNote', { patientId: appointment.patientId })}
+              />
+              {draftInvoiceId && (
+                <Button
+                  label="Review Draft Invoice"
+                  variant="secondary"
+                  onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: draftInvoiceId })}
+                />
+              )}
+            </>
+          )}
+
+          {/* Cancel — available unless already completed/cancelled */}
+          {isCancellable && (
+            <Button label="Cancel Appointment" variant="destructive" onPress={handleCancel} />
           )}
         </View>
       </ScrollView>

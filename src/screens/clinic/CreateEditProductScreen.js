@@ -1,73 +1,112 @@
-import React, { useState } from 'react';
-import { View, ScrollView, Pressable, Switch, StyleSheet } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, ScrollView, Pressable, Switch, TextInput, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
+import { typography } from '../../constants/typography';
 import { AppText } from '../../components/common/AppText';
 import { useAlert } from '../../components/common/CustomAlert';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
-import { SearchBar } from '../../components/common/SearchBar';
 import { Divider } from '../../components/common/Divider';
-import { getStockItemById, TAX_TYPES, mockStockItems } from '../../data/mockStock';
-import { mockSuppliers, searchSuppliers } from '../../data/mockSuppliers';
+import { CalendarDatePicker } from '../../components/common/CalendarDatePicker';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
+
+const TAX_TYPES = [
+  { key: 'vat_16', label: 'VAT 16%', rate: 0.16 },
+  { key: 'zero_rated', label: 'Zero-rated', rate: 0 },
+  { key: 'exempt', label: 'Exempt', rate: 0 },
+];
 
 export default function CreateEditProductScreen({ route, navigation }) {
   const alert = useAlert();
+  const { currentAccount } = useAuth();
   const stockItemId = route.params?.stockItemId;
-  const existing = stockItemId ? getStockItemById(stockItemId) : null;
+  const existing = useQuery(api.stock.get, stockItemId ? { id: stockItemId } : 'skip');
   const isEdit = !!existing;
+  const createItem = useMutation(api.stock.create);
+  const updateItem = useMutation(api.stock.update);
 
-  const [itemCode, setItemCode] = useState(existing?.itemCode || `STK-${String(mockStockItems.length + 1).padStart(3, '0')}`);
+  const [itemCode, setItemCode] = useState(existing?.itemCode || '');
   const [name, setName] = useState(existing?.name || '');
   const [serialNumber, setSerialNumber] = useState(existing?.serialNumber || '');
   const [supplierSearch, setSupplierSearch] = useState('');
-  const [selectedSupplier, setSelectedSupplier] = useState(
-    existing?.supplierId ? mockSuppliers.find(s => s.id === existing.supplierId) : null
-  );
+  const [selectedSupplier, setSelectedSupplier] = useState(null);
   const [showSupplierList, setShowSupplierList] = useState(false);
   const [pricePerItem, setPricePerItem] = useState(existing ? String(existing.pricePerItem) : '');
   const [includesTax, setIncludesTax] = useState(existing?.includesTax || false);
   const [selectedTax, setSelectedTax] = useState(existing?.taxType || 'vat_16');
   const [stockLevel, setStockLevel] = useState(existing ? String(existing.stockLevel) : '');
   const [expiryDate, setExpiryDate] = useState(existing?.expiryDate ? new Date(existing.expiryDate).toISOString().split('T')[0] : '');
+  const [showDatePicker, setShowDatePicker] = useState(false);
   const [notes, setNotes] = useState(existing?.notes || '');
   const [codeError, setCodeError] = useState('');
   const [nameError, setNameError] = useState('');
 
-  const filteredSuppliers = supplierSearch.length > 0
-    ? searchSuppliers(supplierSearch)
-    : mockSuppliers;
+  const allSuppliers = useQuery(api.suppliers.list) ?? [];
+  const filteredSuppliers = React.useMemo(() => {
+    if (!supplierSearch.trim()) return allSuppliers;
+    const q = supplierSearch.toLowerCase();
+    return allSuppliers.filter(s =>
+      (s.name && s.name.toLowerCase().includes(q)) ||
+      (s.contactPerson && s.contactPerson.toLowerCase().includes(q))
+    );
+  }, [allSuppliers, supplierSearch]);
 
   const taxRate = TAX_TYPES.find(t => t.key === selectedTax)?.rate || 0;
   const price = parseFloat(pricePerItem) || 0;
   const costPrice = includesTax ? price : price * (1 + taxRate);
 
-  const validateAndSave = () => {
+  const validateAndSave = async () => {
     let valid = true;
     setCodeError('');
     setNameError('');
 
     if (!name.trim()) { setNameError('Product name is required'); valid = false; }
+    if (!itemCode.trim()) { setCodeError('Item code is required'); valid = false; }
+    if (!valid) return;
 
-    const duplicate = mockStockItems.find(s => s.itemCode === itemCode && s.id !== existing?.id);
-    if (duplicate) { setCodeError('Item code already exists'); valid = false; }
-
-    const nameDuplicate = mockStockItems.find(s =>
-      s.name.toLowerCase() === name.trim().toLowerCase() && s.id !== existing?.id
-    );
-    if (nameDuplicate) {
-      alert({ type: 'warning', title: 'Possible Duplicate', message: `A product named "${nameDuplicate.name}" already exists (${nameDuplicate.itemCode}). Are you sure you want to continue?`, buttons: [{ label: 'Cancel', style: 'cancel' }, { label: 'Continue', onPress: () => doSave() }] });
-      return;
+    try {
+      if (isEdit) {
+        await updateItem({
+          id: stockItemId,
+          name: name.trim(),
+          serialNumber: serialNumber || undefined,
+          supplierId: selectedSupplier?._id || undefined,
+          pricePerItem: parseFloat(pricePerItem) || 0,
+          includesTax,
+          taxType: selectedTax,
+          stockLevel: parseInt(stockLevel) || 0,
+          expiryDate: expiryDate ? new Date(expiryDate).getTime() : undefined,
+          notes: notes || undefined,
+          updatedBy: currentAccount?.userId || 'unknown',
+        });
+      } else {
+        await createItem({
+          itemCode: itemCode.trim(),
+          name: name.trim(),
+          serialNumber: serialNumber || undefined,
+          supplierId: selectedSupplier?._id || undefined,
+          pricePerItem: parseFloat(pricePerItem) || 0,
+          costPrice: costPrice,
+          includesTax,
+          taxType: selectedTax,
+          taxRate,
+          stockLevel: parseInt(stockLevel) || 0,
+          reorderLevel: 5,
+          expiryDate: expiryDate ? new Date(expiryDate).getTime() : undefined,
+          notes: notes || undefined,
+          createdBy: currentAccount?.userId || 'unknown',
+        });
+      }
+      alert({ type: 'success', title: isEdit ? 'Product Updated' : 'Product Created', message: `${name} has been ${isEdit ? 'updated' : 'added to inventory'}.`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to save product.' });
     }
-
-    if (valid) doSave();
-  };
-
-  const doSave = () => {
-    alert({ type: 'success', title: isEdit ? 'Product Updated' : 'Product Created', message: `${name} has been ${isEdit ? 'updated' : 'added to inventory'}.`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
   };
 
   return (
@@ -80,6 +119,7 @@ export default function CreateEditProductScreen({ route, navigation }) {
         <View style={{ width: 24 }} />
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.form}>
         {/* Item Code */}
         <Input label="Item Code" value={itemCode} onChangeText={setItemCode} error={codeError} placeholder="STK-001" />
@@ -97,28 +137,68 @@ export default function CreateEditProductScreen({ route, navigation }) {
         {selectedSupplier ? (
           <View style={styles.selectedChip}>
             <Feather name="truck" size={14} color={colors.navyBlue} />
-            <AppText variant="body" style={{ flex: 1, marginLeft: spacing.sm }}>{selectedSupplier.name}</AppText>
-            <Pressable onPress={() => { setSelectedSupplier(null); setShowSupplierList(true); }}>
+            <View style={{ flex: 1, marginLeft: spacing.sm }}>
+              <AppText variant="body">{selectedSupplier.name}</AppText>
+              {selectedSupplier.contactPerson ? (
+                <AppText variant="small" color={colors.mediumGrey}>{selectedSupplier.contactPerson}</AppText>
+              ) : null}
+            </View>
+            <Pressable onPress={() => { setSelectedSupplier(null); setShowSupplierList(true); }} hitSlop={8}>
               <Feather name="x" size={16} color={colors.mediumGrey} />
             </Pressable>
           </View>
         ) : (
-          <>
-            <SearchBar placeholder="Search suppliers..." value={supplierSearch} onChangeText={(t) => { setSupplierSearch(t); setShowSupplierList(true); }} />
+          <View>
+            <View style={styles.supplierSearchRow}>
+              <Feather name="search" size={16} color={colors.mediumGrey} />
+              <TextInput
+                style={styles.supplierSearchInput}
+                placeholder="Search by name or contact person..."
+                placeholderTextColor={colors.mediumGrey}
+                value={supplierSearch}
+                onChangeText={(t) => { setSupplierSearch(t); if (!showSupplierList) setShowSupplierList(true); }}
+                onFocus={() => setShowSupplierList(true)}
+              />
+              {supplierSearch.length > 0 && (
+                <Pressable onPress={() => setSupplierSearch('')} hitSlop={8}>
+                  <Feather name="x-circle" size={16} color={colors.mediumGrey} />
+                </Pressable>
+              )}
+              <Pressable
+                style={styles.supplierToggle}
+                onPress={() => setShowSupplierList(!showSupplierList)}
+              >
+                <Feather name={showSupplierList ? 'chevron-up' : 'chevron-down'} size={18} color={colors.darkGrey} />
+              </Pressable>
+            </View>
             {showSupplierList && (
               <View style={styles.dropdown}>
-                {filteredSuppliers.map(s => (
-                  <Pressable key={s.id} style={styles.dropdownItem} onPress={() => { setSelectedSupplier(s); setShowSupplierList(false); setSupplierSearch(''); }}>
-                    <AppText variant="body">{s.name}</AppText>
-                    <AppText variant="small" color={colors.mediumGrey}>{s.contactPerson}</AppText>
-                  </Pressable>
-                ))}
-                <Pressable style={[styles.dropdownItem, { borderTopWidth: 1, borderTopColor: colors.lightGrey }]} onPress={() => navigation.navigate('CreateEditSupplier')}>
-                  <AppText variant="bodyBold" color={colors.navyBlue}>+ Add New Supplier</AppText>
+                {filteredSuppliers.length === 0 && supplierSearch.length > 0 ? (
+                  <View style={styles.dropdownEmpty}>
+                    <AppText variant="body" color={colors.mediumGrey}>No suppliers match "{supplierSearch}"</AppText>
+                  </View>
+                ) : (
+                  filteredSuppliers.map(s => (
+                    <Pressable key={s._id} style={({ pressed }) => [styles.dropdownItem, pressed && { backgroundColor: colors.offWhite }]} onPress={() => { setSelectedSupplier(s); setShowSupplierList(false); setSupplierSearch(''); }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Feather name="truck" size={14} color={colors.navyBlue} style={{ marginRight: spacing.sm }} />
+                        <AppText variant="bodyBold">{s.name}</AppText>
+                      </View>
+                      {s.contactPerson ? (
+                        <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: spacing.lg + spacing.sm }}>
+                          Contact: {s.contactPerson}
+                        </AppText>
+                      ) : null}
+                    </Pressable>
+                  ))
+                )}
+                <Pressable style={[styles.dropdownItem, styles.dropdownAddNew]} onPress={() => { setShowSupplierList(false); navigation.navigate('CreateEditSupplier'); }}>
+                  <Feather name="plus-circle" size={14} color={colors.navyBlue} style={{ marginRight: spacing.sm }} />
+                  <AppText variant="bodyBold" color={colors.navyBlue}>Add New Supplier</AppText>
                 </Pressable>
               </View>
             )}
-          </>
+          </View>
         )}
 
         <Divider type="section" />
@@ -154,7 +234,29 @@ export default function CreateEditProductScreen({ route, navigation }) {
         <Input label="Stock Level" value={stockLevel} onChangeText={setStockLevel} placeholder="Current quantity" keyboardType="number-pad" />
 
         {/* Expiry Date */}
-        <Input label="Expiry Date (YYYY-MM-DD)" value={expiryDate} onChangeText={setExpiryDate} placeholder="e.g. 2026-10-15" />
+        <View style={styles.fieldWrap}>
+          <AppText style={styles.dateLabel}>Expiry Date</AppText>
+          <Pressable style={styles.dateBtn} onPress={() => setShowDatePicker(true)}>
+            <Feather name="calendar" size={18} color={colors.navyBlue} />
+            <AppText variant="body" color={expiryDate ? colors.black : colors.mediumGrey} style={{ flex: 1, marginLeft: spacing.sm }}>
+              {expiryDate || 'Select expiry date'}
+            </AppText>
+            {expiryDate ? (
+              <Pressable hitSlop={8} onPress={() => setExpiryDate('')}>
+                <Feather name="x-circle" size={16} color={colors.mediumGrey} />
+              </Pressable>
+            ) : (
+              <Feather name="chevron-down" size={16} color={colors.mediumGrey} />
+            )}
+          </Pressable>
+        </View>
+
+        <CalendarDatePicker
+          visible={showDatePicker}
+          selectedDate={expiryDate}
+          onSelect={(dateStr) => { setExpiryDate(dateStr); setShowDatePicker(false); }}
+          onClose={() => setShowDatePicker(false)}
+        />
 
         {/* Notes */}
         <Input label="Notes" value={notes} onChangeText={setNotes} placeholder="Storage instructions, special handling..." multiline />
@@ -167,6 +269,7 @@ export default function CreateEditProductScreen({ route, navigation }) {
           <AppText variant="body" color={colors.mediumGrey}>Cancel</AppText>
         </Pressable>
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -178,13 +281,49 @@ const styles = StyleSheet.create({
   form: { paddingHorizontal: spacing.base, paddingBottom: 100 },
   fieldLabel: { letterSpacing: 1, marginBottom: spacing.sm, marginTop: spacing.md },
   selectedChip: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, borderRadius: radius.md, backgroundColor: colors.navyLight, marginBottom: spacing.sm },
-  dropdown: { borderWidth: 1, borderColor: colors.lightGrey, borderRadius: radius.md, marginBottom: spacing.sm, maxHeight: 200 },
+  supplierSearchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.offWhite,
+    borderWidth: 1,
+    borderColor: colors.lightGrey,
+    borderRadius: radius.md,
+    height: 48,
+    paddingHorizontal: spacing.md,
+    marginBottom: spacing.xs,
+  },
+  supplierSearchInput: {
+    flex: 1,
+    ...typography.body,
+    color: colors.black,
+    height: '100%',
+    marginLeft: spacing.sm,
+  },
+  supplierToggle: {
+    marginLeft: spacing.sm,
+    padding: spacing.xs,
+  },
+  dropdown: { borderWidth: 1, borderColor: colors.lightGrey, borderRadius: radius.md, marginBottom: spacing.sm, maxHeight: 220, backgroundColor: colors.white },
   dropdownItem: { padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.offWhite },
+  dropdownEmpty: { padding: spacing.lg, alignItems: 'center' },
+  dropdownAddNew: { borderTopWidth: 1, borderTopColor: colors.lightGrey, borderBottomWidth: 0, flexDirection: 'row', alignItems: 'center' },
   switchRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm },
   taxRow: { flexDirection: 'row', gap: spacing.sm, marginBottom: spacing.sm },
   taxPill: { paddingHorizontal: spacing.md, paddingVertical: spacing.sm, borderRadius: radius.full, backgroundColor: colors.offWhite },
   taxPillActive: { backgroundColor: colors.navyBlue },
   costPreview: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.md, backgroundColor: colors.surface, borderRadius: radius.md, marginTop: spacing.sm },
+  fieldWrap: { marginBottom: spacing.base },
+  dateLabel: { ...typography.caption, color: colors.darkGrey, marginBottom: spacing.xs },
+  dateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    paddingHorizontal: spacing.base,
+    borderWidth: 1.5,
+    borderColor: colors.lightGrey,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+  },
   buttonRow: { flexDirection: 'row', marginTop: spacing.xl, gap: spacing.sm },
   cancelBtn: { alignItems: 'center', paddingVertical: spacing.md },
 });

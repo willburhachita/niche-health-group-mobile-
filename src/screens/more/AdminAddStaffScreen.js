@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet, Modal, Linking } from 'react-native';
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet, Modal, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useMutation } from 'convex/react';
@@ -18,7 +18,6 @@ import { useAlert } from '../../components/common/CustomAlert';
 import {
   ROLES,
   generateStrongPassword,
-  generateVerificationCode,
 } from '../../data/mockAuth';
 
 const ROLE_OPTIONS = [
@@ -34,7 +33,6 @@ export default function AdminAddStaffScreen({ navigation }) {
   const [email, setEmail] = useState('');
   const [selectedRole, setSelectedRole] = useState('member');
   const [generatedPassword, setGeneratedPassword] = useState('');
-  const [generatedCode, setGeneratedCode] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [copied, setCopied] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
@@ -43,16 +41,13 @@ export default function AdminAddStaffScreen({ navigation }) {
 
   const handleCreateAccount = async () => {
     const pw = generateStrongPassword(14);
-    const code = generateVerificationCode();
     setGeneratedPassword(pw);
-    setGeneratedCode(code);
     setIsCreating(true);
     try {
       const result = await createStaffAccount({
         email: email.trim().toLowerCase(),
         role: selectedRole,
         password: pw,
-        verificationCode: code,
         createdBy: currentAccount?.email || 'admin',
       });
       if (result.success) {
@@ -68,7 +63,7 @@ export default function AdminAddStaffScreen({ navigation }) {
   };
 
   const handleCopy = async () => {
-    const text = `Email: ${email}\nVerification Code: ${generatedCode}\nPassword: ${generatedPassword}\nRole: ${ROLES[selectedRole].label}`;
+    const text = `Email: ${email}\nPassword: ${generatedPassword}\nRole: ${ROLES[selectedRole].label}\n\nA verification code will be sent to this email address each time they sign in.`;
     await Clipboard.setStringAsync(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
@@ -80,10 +75,10 @@ export default function AdminAddStaffScreen({ navigation }) {
       `Welcome to NHL Connect!\n\n` +
       `Here are your login credentials:\n\n` +
       `Email: ${email}\n` +
-      `Verification Code: ${generatedCode}\n` +
       `Password: ${generatedPassword}\n` +
       `Role: ${ROLES[selectedRole].label}\n\n` +
-      `Please download the app and sign in. You will be asked to complete your profile on first login.\n\n` +
+      `When you sign in, a one-time verification code will be sent to this email address automatically.\n\n` +
+      `Please download the app and sign in to complete your profile.\n\n` +
       `— Niche Healthcare Administration`
     );
     Linking.openURL(`mailto:${email}?subject=${subject}&body=${body}`);
@@ -94,7 +89,6 @@ export default function AdminAddStaffScreen({ navigation }) {
     setEmail('');
     setSelectedRole('member');
     setGeneratedPassword('');
-    setGeneratedCode('');
     setCopied(false);
   };
 
@@ -103,7 +97,6 @@ export default function AdminAddStaffScreen({ navigation }) {
     setEmail('');
     setSelectedRole('member');
     setGeneratedPassword('');
-    setGeneratedCode('');
     setCopied(false);
   };
 
@@ -117,6 +110,7 @@ export default function AdminAddStaffScreen({ navigation }) {
         <View style={{ width: 24 }} />
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
@@ -180,6 +174,7 @@ export default function AdminAddStaffScreen({ navigation }) {
 
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* ── Success Modal ─────────────────────────────────────────── */}
       <Modal visible={showModal} transparent animationType="fade">
@@ -204,11 +199,6 @@ export default function AdminAddStaffScreen({ navigation }) {
               </View>
               <Divider />
               <View style={styles.credRow}>
-                <AppText variant="small" color={colors.mediumGrey}>Verification Code</AppText>
-                <AppText variant="h3" color={colors.navyBlue} style={styles.credValue}>{generatedCode}</AppText>
-              </View>
-              <Divider />
-              <View style={styles.credRow}>
                 <AppText variant="small" color={colors.mediumGrey}>Password</AppText>
                 <AppText variant="bodyBold" style={styles.credValue}>{generatedPassword}</AppText>
               </View>
@@ -217,6 +207,13 @@ export default function AdminAddStaffScreen({ navigation }) {
                 <AppText variant="small" color={colors.mediumGrey}>Role</AppText>
                 <AppText variant="bodyBold" color={colors.navyBlue} style={styles.credValue}>
                   {ROLES[selectedRole].label}
+                </AppText>
+              </View>
+              <Divider />
+              <View style={styles.credRow}>
+                <AppText variant="small" color={colors.mediumGrey}>Verification</AppText>
+                <AppText variant="caption" color={colors.success} style={styles.credValue}>
+                  Sent automatically by email on sign-in
                 </AppText>
               </View>
             </View>

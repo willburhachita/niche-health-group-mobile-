@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -9,9 +11,6 @@ import { shadows } from '../../constants/shadows';
 import { AppText } from '../../components/common/AppText';
 import { SearchBar } from '../../components/common/SearchBar';
 import { Badge } from '../../components/common/Badge';
-import { mockSuppliers, searchSuppliers } from '../../data/mockSuppliers';
-import { mockStockItems } from '../../data/mockStock';
-import { formatTimestamp } from '../../utils/dateHelpers';
 
 const FILTERS = ['All', 'Frequent', 'New'];
 
@@ -19,19 +18,18 @@ export default function SuppliersListScreen({ navigation }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('All');
 
-  const getFilteredSuppliers = () => {
-    let items = search.length > 0 ? searchSuppliers(search) : mockSuppliers;
+  const allSuppliers = useQuery(api.suppliers.list) ?? [];
+  const searchResults = useQuery(api.suppliers.search, { query: search });
+
+  const suppliers = useMemo(() => {
+    let items = search.length > 0 ? (searchResults ?? []) : allSuppliers;
     if (filter === 'Frequent') return items.filter(s => s.isFrequent);
-    if (filter === 'New') return items.filter(s => s.orderCount <= 3);
+    if (filter === 'New') return items.filter(s => (s.orderCount ?? 0) <= 3);
     return items;
-  };
-
-  const suppliers = getFilteredSuppliers();
-
-  const getProductCount = (supplierId) => mockStockItems.filter(s => s.supplierId === supplierId).length;
+  }, [allSuppliers, searchResults, filter, search]);
 
   const renderItem = ({ item }) => (
-    <Pressable style={styles.card} onPress={() => navigation.navigate('SupplierDetail', { supplierId: item.id })}>
+    <Pressable style={styles.card} onPress={() => navigation.navigate('SupplierDetail', { supplierId: item._id })}>
       <View style={styles.iconCircle}>
         <Feather name="truck" size={18} color={colors.navyBlue} />
       </View>
@@ -39,9 +37,7 @@ export default function SuppliersListScreen({ navigation }) {
         <AppText variant="bodyBold">{item.name}</AppText>
         <AppText variant="caption" color={colors.darkGrey}>{item.contactPerson} · {item.phone}</AppText>
         <View style={styles.metaRow}>
-          <AppText variant="small" color={colors.mediumGrey}>{getProductCount(item.id)} products</AppText>
-          <AppText variant="small" color={colors.mediumGrey}> · </AppText>
-          <AppText variant="small" color={colors.mediumGrey}>{item.orderCount} orders</AppText>
+          <AppText variant="small" color={colors.mediumGrey}>{item.orderCount ?? 0} orders</AppText>
           {item.isFrequent && <Badge variant="success" count={0} style={{ marginLeft: spacing.sm }}><AppText variant="small" color={colors.success}>Frequent</AppText></Badge>}
         </View>
       </View>
@@ -73,7 +69,7 @@ export default function SuppliersListScreen({ navigation }) {
 
       <FlatList
         data={suppliers}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={renderItem}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: TAB_BAR_HEIGHT }}
         ListEmptyComponent={<AppText variant="body" color={colors.mediumGrey} style={{ padding: spacing.xl, textAlign: 'center' }}>No suppliers found</AppText>}

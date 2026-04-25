@@ -10,7 +10,7 @@ export const Input = ({ label, value, onChangeText, placeholder, error, icon, se
   return (
     <View style={[styles.container, style]}>
       {label && <Text style={styles.label}>{label}</Text>}
-      <View style={[styles.inputWrapper, error && styles.errorBorder, !editable && styles.disabled]}>
+      <View style={[styles.inputWrapper, multiline && styles.multilineWrapper, error && styles.errorBorder, !editable && styles.disabled]}>
         {icon && <Feather name={icon} size={20} color={colors.mediumGrey} style={styles.icon} />}
         <TextInput
           style={[styles.input, multiline && styles.multiline, icon && { paddingLeft: 0 }]}
@@ -50,6 +50,7 @@ const styles = StyleSheet.create({
     color: colors.black,
     height: '100%',
   },
+  multilineWrapper: { height: 'auto', minHeight: 100 },
   multiline: { height: 100, textAlignVertical: 'top', paddingTop: spacing.md },
   errorBorder: { borderColor: colors.error },
   errorText: { ...typography.caption, color: colors.error, marginTop: spacing.xs },

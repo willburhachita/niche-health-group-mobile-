@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -12,18 +12,63 @@ import { Avatar } from '../../components/common/Avatar';
 import { Button } from '../../components/common/Button';
 import { SectionHeader } from '../../components/common/SectionHeader';
 import { EmptyState } from '../../components/common/EmptyState';
-import { getPatientById } from '../../data/mockPatients';
-import { mockAppointments } from '../../data/mockAppointments';
+import { Badge } from '../../components/common/Badge';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
 import { formatTime } from '../../utils/dateHelpers';
 
 export default function TelehealthScreen({ navigation }) {
-  const now = Date.now();
-  const telehealthApts = mockAppointments.filter(a => a.type === 'Telehealth' || a.location === 'Virtual');
-  const upcoming = telehealthApts.filter(a => a.startTime > now && a.status !== 'cancelled');
-  const past = telehealthApts.filter(a => a.startTime <= now || a.status === 'completed');
+  const { currentUserId } = useAuth();
+  const now = useMemo(() => Date.now(), []);
 
-  // Mock active session
-  const activeSession = null;
+  // Fetch telehealth appointments (30 days window)
+  const queryRange = useMemo(() => ({
+    startFrom: now - 30 * 86400000,
+    startTo: now + 30 * 86400000,
+  }), [now]);
+  const allApts = useQuery(api.appointments.listByDateRange, queryRange) ?? [];
+  const patients = useQuery(api.patients.list, {}) ?? [];
+
+  // Active session for current provider
+  const activeSession = useQuery(
+    api.telehealth.getActiveForProvider,
+    currentUserId ? { providerId: currentUserId } : 'skip'
+  );
+
+  // Completed sessions
+  const completedSessions = useQuery(api.telehealth.listCompleted, { limit: 30 }) ?? [];
+
+  const patientMap = useMemo(() => {
+    const m = {};
+    patients.forEach(p => { m[p._id] = p; });
+    return m;
+  }, [patients]);
+
+  const telehealthApts = allApts.filter(a => a.type === 'Telehealth' || a.location === 'Virtual');
+  const upcoming = telehealthApts.filter(a => a.startTime > now && a.status !== 'cancelled' && a.status !== 'completed');
+  const upcomingSorted = useMemo(() => [...upcoming].sort((a, b) => a.startTime - b.startTime), [upcoming]);
+
+  // Build a set of appointment IDs that have completed sessions
+  const completedAptIds = useMemo(() => {
+    const s = new Set();
+    completedSessions.forEach(cs => s.add(cs.appointmentId));
+    return s;
+  }, [completedSessions]);
+
+  const formatDuration = (seconds) => {
+    if (!seconds) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}:${String(s).padStart(2, '0')}`;
+  };
+
+  const formatDateShort = (ts) => {
+    const d = new Date(ts);
+    const day = d.getDate();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return `${day} ${months[d.getMonth()]}`;
+  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -36,42 +81,94 @@ export default function TelehealthScreen({ navigation }) {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: TAB_BAR_HEIGHT }}>
-        {/* Active Session */}
+        {/* Active Session Banner */}
         {activeSession && (
           <View style={{ paddingHorizontal: spacing.base, marginBottom: spacing.base }}>
-            <Card variant="highlighted">
-              <View style={styles.activeRow}>
-                <View style={styles.liveDot} />
-                <AppText variant="bodyBold" style={{ flex: 1 }}>In Progress: Patient Name</AppText>
-                <AppText variant="caption" color={colors.darkGrey}>12:34</AppText>
+            <Card>
+              <View style={styles.activeBanner}>
+                <View style={styles.activeRow}>
+                  <View style={styles.liveDot} />
+                  <AppText variant="bodyBold" style={{ flex: 1 }}>
+                    Call In Progress
+                  </AppText>
+                  <AppText variant="caption" color={colors.darkGrey}>
+                    {activeSession.startedAt ? formatDuration(Math.round((now - activeSession.startedAt) / 1000)) : '--:--'}
+                  </AppText>
+                </View>
+                <View style={styles.activePatientRow}>
+                  {patientMap[activeSession.patientId] && (
+                    <Avatar name={patientMap[activeSession.patientId].displayName} size={36} />
+                  )}
+                  <AppText variant="body" style={{ marginLeft: spacing.sm, flex: 1 }}>
+                    {patientMap[activeSession.patientId]?.displayName || 'Patient'}
+                  </AppText>
+                </View>
+                <Button
+                  label="Rejoin Call"
+                  onPress={() => navigation.navigate('TelehealthCall', {
+                    appointmentId: activeSession.appointmentId,
+                    sessionId: activeSession._id,
+                  })}
+                  style={{ marginTop: spacing.md }}
+                />
               </View>
-              <Button label="Rejoin" onPress={() => {}} style={{ marginTop: spacing.sm }} />
             </Card>
           </View>
         )}
 
+        {/* Stats */}
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}>
+            <Feather name="video" size={20} color={colors.navyBlue} />
+            <AppText variant="h2" style={{ marginTop: spacing.xs }}>{upcomingSorted.length}</AppText>
+            <AppText variant="small" color={colors.mediumGrey}>Upcoming</AppText>
+          </View>
+          <View style={styles.statBox}>
+            <Feather name="check-circle" size={20} color={colors.success} />
+            <AppText variant="h2" style={{ marginTop: spacing.xs }}>{completedSessions.length}</AppText>
+            <AppText variant="small" color={colors.mediumGrey}>Completed</AppText>
+          </View>
+          <View style={styles.statBox}>
+            <Feather name="clock" size={20} color={colors.peach} />
+            <AppText variant="h2" style={{ marginTop: spacing.xs }}>
+              {completedSessions.reduce((a, s) => a + (s.duration || 0), 0) > 0
+                ? `${Math.round(completedSessions.reduce((a, s) => a + (s.duration || 0), 0) / 60)}m`
+                : '0m'
+              }
+            </AppText>
+            <AppText variant="small" color={colors.mediumGrey}>Call Time</AppText>
+          </View>
+        </View>
+
         {/* Upcoming Virtual Appointments */}
-        <SectionHeader title="Upcoming Virtual Appointments" />
-        {upcoming.length === 0 ? (
+        <SectionHeader title="Upcoming Sessions" />
+        {upcomingSorted.length === 0 ? (
           <EmptyState icon="video" title="No telehealth sessions" message="No upcoming virtual appointments scheduled" />
         ) : (
-          upcoming.map(apt => {
-            const patient = apt.patientId ? getPatientById(apt.patientId) : null;
-            const canStart = apt.startTime - now < 5 * 60 * 1000; // 5 min before
+          upcomingSorted.map(apt => {
+            const patient = apt.patientId ? patientMap[apt.patientId] : null;
+            const minutesUntil = Math.round((apt.startTime - now) / 60000);
+            const canStart = minutesUntil < 5;
+            const isActive = activeSession?.appointmentId === apt._id;
 
             return (
               <Pressable
-                key={apt.id}
-                style={({ pressed }) => [styles.sessionCard, pressed && styles.pressed]}
-                onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: apt.id })}
+                key={apt._id}
+                style={({ pressed }) => [styles.sessionCard, pressed && styles.pressed, isActive && styles.sessionCardActive]}
+                onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: apt._id })}
               >
                 <View style={styles.sessionLeft}>
                   {patient && <Avatar name={patient.displayName} size={44} />}
                   <View style={styles.sessionInfo}>
-                    <AppText variant="bodyBold">{patient?.displayName || 'Unknown'}</AppText>
+                    <AppText variant="bodyBold">{patient?.displayName || 'Unknown Patient'}</AppText>
                     <AppText variant="caption" color={colors.darkGrey}>
                       {formatTime(apt.startTime)} · {apt.duration}min
                     </AppText>
+                    {minutesUntil > 0 && minutesUntil <= 60 && (
+                      <AppText variant="small" color={canStart ? colors.success : colors.peach}>
+                        {canStart ? 'Ready to start' : `Starts in ${minutesUntil}min`}
+                      </AppText>
+                    )}
                     {apt.notes && (
                       <AppText variant="small" color={colors.mediumGrey} numberOfLines={1}>{apt.notes}</AppText>
                     )}
@@ -79,9 +176,10 @@ export default function TelehealthScreen({ navigation }) {
                 </View>
                 <Pressable
                   style={[styles.startBtn, !canStart && styles.startBtnDisabled]}
-                  onPress={() => {
+                  onPress={(e) => {
+                    e.stopPropagation();
                     if (canStart) {
-                      navigation.navigate('TelehealthCall', { appointmentId: apt.id });
+                      navigation.navigate('TelehealthCall', { appointmentId: apt._id });
                     }
                   }}
                 >
@@ -91,7 +189,7 @@ export default function TelehealthScreen({ navigation }) {
                     color={canStart ? colors.white : colors.mediumGrey}
                     style={{ marginLeft: spacing.xs }}
                   >
-                    {canStart ? 'Start' : 'Upcoming'}
+                    {isActive ? 'Rejoin' : canStart ? 'Start' : 'Upcoming'}
                   </AppText>
                 </Pressable>
               </Pressable>
@@ -99,24 +197,35 @@ export default function TelehealthScreen({ navigation }) {
           })
         )}
 
-        {/* Past Sessions */}
-        {past.length > 0 && (
+        {/* Past Completed Sessions */}
+        {completedSessions.length > 0 && (
           <>
-            <SectionHeader title="Past Sessions" />
-            {past.map(apt => {
-              const patient = apt.patientId ? getPatientById(apt.patientId) : null;
+            <SectionHeader title="Completed Sessions" />
+            {completedSessions.map(session => {
+              const patient = patientMap[session.patientId];
               return (
                 <Pressable
-                  key={apt.id}
+                  key={session._id}
                   style={({ pressed }) => [styles.pastCard, pressed && styles.pressed]}
-                  onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: apt.id })}
+                  onPress={() => navigation.navigate('TelehealthCallSummary', {
+                    sessionId: session._id,
+                    appointmentId: session.appointmentId,
+                  })}
                 >
                   {patient && <Avatar name={patient.displayName} size={36} />}
                   <View style={styles.pastInfo}>
                     <AppText variant="body">{patient?.displayName || 'Unknown'}</AppText>
-                    <AppText variant="small" color={colors.mediumGrey}>
-                      {formatTime(apt.startTime)} · {apt.duration}min
-                    </AppText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm }}>
+                      <AppText variant="small" color={colors.mediumGrey}>
+                        {session.startedAt ? formatDateShort(session.startedAt) : '--'} · {formatDuration(session.duration)}
+                      </AppText>
+                      {session.treatmentNoteId && (
+                        <Badge label="Notes" variant="success" />
+                      )}
+                      {session.transcription && (
+                        <Badge label="Transcribed" variant="role" />
+                      )}
+                    </View>
                   </View>
                   <Feather name="chevron-right" size={16} color={colors.lightGrey} />
                 </Pressable>
@@ -139,9 +248,15 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.md,
   },
   headerTitle: { flex: 1, textAlign: 'center' },
+  activeBanner: {},
   activeRow: {
     flexDirection: 'row',
     alignItems: 'center',
+  },
+  activePatientRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.sm,
   },
   liveDot: {
     width: 10,
@@ -149,6 +264,21 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     backgroundColor: colors.error,
     marginRight: spacing.sm,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    paddingHorizontal: spacing.base,
+    marginBottom: spacing.base,
+    gap: spacing.sm,
+  },
+  statBox: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.lightGrey,
   },
   sessionCard: {
     flexDirection: 'row',
@@ -162,6 +292,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.lightGrey,
     ...shadows.subtle,
+  },
+  sessionCardActive: {
+    borderColor: colors.navyBlue,
+    backgroundColor: colors.navyLight,
   },
   pressed: {
     backgroundColor: colors.offWhite,

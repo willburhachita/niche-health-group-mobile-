@@ -34,15 +34,16 @@ export const getConversation = query({
 });
 
 export const getMessages = query({
-  args: { conversationId: v.id("conversations") },
-  handler: async (ctx, { conversationId }) => {
+  args: { conversationId: v.id("conversations"), viewerId: v.optional(v.string()) },
+  handler: async (ctx, { conversationId, viewerId }) => {
     const msgs = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => q.eq("conversationId", conversationId))
       .collect();
     console.log(`[MSG] getMessages for ${conversationId}: returned ${msgs.length} messages`);
-    return await Promise.all(msgs.map(async (msg) => {
-      if (msg.type === "voice" && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
+    const visible = viewerId ? msgs.filter(m => !m.hiddenBy?.includes(viewerId)) : msgs;
+    return await Promise.all(visible.map(async (msg) => {
+      if ((msg.type === "voice" || msg.type === "file" || msg.type === "image") && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
         const url = await ctx.storage.getUrl(msg.fileUrl as any);
         return { ...msg, fileUrl: url ?? msg.fileUrl };
       }
@@ -87,11 +88,46 @@ export const sendMessage = mutation({
       lastMessage: content,
       lastMessageBy: senderId,
       lastMessageAt: now,
+      lastMessageType: type ?? "text",
       unreadBy,
     });
 
     console.log(`[MSG] ✅ Message sent: ${msgId}`);
     return msgId;
+  },
+});
+
+export const deleteMessage = mutation({
+  args: {
+    messageId: v.id("messages"),
+    userId: v.string(),
+    forEveryone: v.boolean(),
+  },
+  handler: async (ctx, { messageId, userId, forEveryone }) => {
+    const msg = await ctx.db.get(messageId);
+    if (!msg) return;
+    if (forEveryone) {
+      // Only the sender can unsend for everyone
+      if (msg.senderId !== userId) return;
+      await ctx.db.patch(messageId, { content: "This message was unsent.", type: "deleted", fileUrl: undefined, fileName: undefined });
+    } else {
+      // Mark hidden for this user only
+      const hiddenBy: string[] = [...(msg.hiddenBy ?? []), userId];
+      await ctx.db.patch(messageId, { hiddenBy });
+    }
+  },
+});
+
+export const editMessage = mutation({
+  args: {
+    messageId: v.id("messages"),
+    userId: v.string(),
+    newContent: v.string(),
+  },
+  handler: async (ctx, { messageId, userId, newContent }) => {
+    const msg = await ctx.db.get(messageId);
+    if (!msg || msg.senderId !== userId) return;
+    await ctx.db.patch(messageId, { content: newContent, editedAt: Date.now() });
   },
 });
 
@@ -127,7 +163,8 @@ export const markConversationRead = mutation({
     const conv = await ctx.db.get(conversationId);
     if (!conv) return;
     const unreadBy = { ...(conv.unreadBy ?? {}), [userId]: false };
-    await ctx.db.patch(conversationId, { unreadBy });
+    const readAt = { ...(conv.readAt ?? {}), [userId]: Date.now() };
+    await ctx.db.patch(conversationId, { unreadBy, readAt });
   },
 });
 

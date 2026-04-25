@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { View, TextInput, Pressable, StyleSheet, Animated } from 'react-native';
+import { View, TextInput, Pressable, StyleSheet, Animated, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useConvex } from 'convex/react';
+import { useConvex, useAction } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
@@ -12,9 +12,12 @@ import { AppText } from '../../components/common/AppText';
 
 export default function OTPScreen({ navigation, route }) {
   const convex = useConvex();
+  const sendOTPCode = useAction(api.notifications.sendOTPCode);
   const [code, setCode] = useState(['', '', '', '', '', '']);
   const [error, setError] = useState('');
-  const [timer, setTimer] = useState(45);
+  const [timer, setTimer] = useState(600); // 10 minutes
+  const [verifying, setVerifying] = useState(false);
+  const [resending, setResending] = useState(false);
   const inputs = useRef([]);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const email = route?.params?.email || '';
@@ -25,6 +28,12 @@ export default function OTPScreen({ navigation, route }) {
     return () => clearInterval(interval);
   }, []);
 
+  const formatTimer = (s) => {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return `${m}:${sec < 10 ? '0' : ''}${sec}`;
+  };
+
   const triggerShake = () => {
     Animated.sequence([
       Animated.timing(shakeAnim, { toValue: 10, duration: 50, useNativeDriver: true }),
@@ -34,30 +43,36 @@ export default function OTPScreen({ navigation, route }) {
     ]).start();
   };
 
+  const verifyCode = async (fullCode) => {
+    setVerifying(true);
+    try {
+      const result = await convex.mutation(api.auth.verifyOTPCode, { email, code: fullCode });
+      if (result.success) {
+        navigation.navigate('Password', { email });
+      } else {
+        setError(result.error || 'Invalid verification code');
+        triggerShake();
+        setCode(['', '', '', '', '', '']);
+        inputs.current[0]?.focus();
+      }
+    } catch {
+      setError('Something went wrong. Please try again.');
+      triggerShake();
+    } finally {
+      setVerifying(false);
+    }
+  };
+
   const handleChange = (text, index) => {
     const newCode = [...code];
     newCode[index] = text;
     setCode(newCode);
     setError('');
-
     if (text && index < 5) {
       inputs.current[index + 1]?.focus();
     }
-
     if (index === 5 && text) {
-      const fullCode = newCode.join('');
-      // Look up account from Convex and verify the code
-      convex.query(api.auth.getAccountByEmail, { email }).then((account) => {
-        if (account && account.verificationCode === fullCode) {
-          navigation.navigate('Password', { email });
-        } else {
-          setError('Invalid verification code');
-          triggerShake();
-        }
-      }).catch(() => {
-        setError('Something went wrong. Please try again.');
-        triggerShake();
-      });
+      verifyCode(newCode.join(''));
     }
   };
 
@@ -67,6 +82,25 @@ export default function OTPScreen({ navigation, route }) {
       const newCode = [...code];
       newCode[index - 1] = '';
       setCode(newCode);
+    }
+  };
+
+  const handleResend = async () => {
+    setResending(true);
+    setError('');
+    setCode(['', '', '', '', '', '']);
+    try {
+      const result = await sendOTPCode({ email });
+      if (result.success) {
+        setTimer(600);
+        inputs.current[0]?.focus();
+      } else {
+        setError(result.error || 'Failed to resend. Please try again.');
+      }
+    } catch {
+      setError('Failed to resend. Please try again.');
+    } finally {
+      setResending(false);
     }
   };
 
@@ -107,16 +141,35 @@ export default function OTPScreen({ navigation, route }) {
           ))}
         </Animated.View>
 
+        {verifying && (
+          <View style={styles.verifyingRow}>
+            <ActivityIndicator size="small" color={colors.navyBlue} />
+            <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Verifying...</AppText>
+          </View>
+        )}
+
         {error ? (
           <AppText variant="caption" color={colors.error} style={styles.error}>{error}</AppText>
         ) : null}
 
         {timer > 0 ? (
           <AppText variant="caption" color={colors.mediumGrey} style={styles.timer}>
-            Resend code in 0:{timer < 10 ? `0${timer}` : timer}
+            Code expires in {formatTimer(timer)}
           </AppText>
         ) : (
-          <Pressable onPress={() => setTimer(45)}>
+          <AppText variant="caption" color={colors.error} style={styles.timer}>
+            Code expired
+          </AppText>
+        )}
+
+        {resending ? (
+          <View style={styles.resendRow}>
+            <ActivityIndicator size="small" color={colors.navyBlue} />
+            <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Sending new code...</AppText>
+          </View>
+        ) : (
+          <Pressable onPress={handleResend} style={styles.resendRow}>
+            <Feather name="refresh-cw" size={13} color={colors.navyBlue} />
             <AppText variant="bodyBold" color={colors.navyBlue} style={styles.resend}>Resend Code</AppText>
           </Pressable>
         )}
@@ -143,7 +196,9 @@ const styles = StyleSheet.create({
   },
   codeBoxFilled: { borderColor: colors.navyBlue },
   codeBoxError: { borderColor: colors.error },
-  error: { textAlign: 'center', marginBottom: spacing.base },
-  timer: { textAlign: 'center' },
-  resend: { textAlign: 'center' },
+  error: { textAlign: 'center', marginBottom: spacing.sm },
+  timer: { textAlign: 'center', marginBottom: spacing.sm },
+  verifyingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
+  resendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, marginTop: spacing.sm },
+  resend: { marginLeft: spacing.xs },
 });

@@ -8,10 +8,13 @@ import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { Badge } from '../../components/common/Badge';
 import { Card } from '../../components/common/Card';
-import { mockTrainingSessions } from '../../data/mockSchedule';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { formatDateShort } from '../../utils/dateHelpers';
 
 export default function TrainingListScreen({ navigation }) {
+  const trainingSessions = useQuery(api.scheduleEvents.listTraining) ?? [];
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -20,8 +23,8 @@ export default function TrainingListScreen({ navigation }) {
         <View style={{ width: 24 }} />
       </View>
       <FlatList
-        data={mockTrainingSessions}
-        keyExtractor={item => item.id}
+        data={trainingSessions}
+        keyExtractor={item => item._id}
         contentContainerStyle={{ padding: spacing.base }}
         renderItem={({ item }) => (
           <Card onPress={() => {}}>
@@ -31,8 +34,8 @@ export default function TrainingListScreen({ navigation }) {
               </View>
               <View style={{ flex: 1 }}>
                 <AppText variant="bodyBold">{item.title}</AppText>
-                <AppText variant="caption" color={colors.darkGrey}>{formatDateShort(item.date)} | {item.time}</AppText>
-                <AppText variant="small" color={colors.mediumGrey}>Instructor: {item.instructor}</AppText>
+                <AppText variant="caption" color={colors.darkGrey}>{formatDateShort(item.startTime)}</AppText>
+                <AppText variant="small" color={colors.mediumGrey}>Organiser: {item.createdBy || 'Unknown'}</AppText>
               </View>
               {item.isRegistered ? (
                 <Badge label="Registered" variant="success" />

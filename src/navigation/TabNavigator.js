@@ -74,6 +74,7 @@ import CreateInvoiceScreen from '../screens/clinic/CreateInvoiceScreen';
 import ReportsDashboardScreen from '../screens/clinic/ReportsDashboardScreen';
 import TelehealthScreen from '../screens/clinic/TelehealthScreen';
 import TelehealthCallScreen from '../screens/clinic/TelehealthCallScreen';
+import TelehealthCallSummaryScreen from '../screens/clinic/TelehealthCallSummaryScreen';
 
 // Stock & Inventory
 import StockListScreen from '../screens/clinic/StockListScreen';
@@ -278,6 +279,7 @@ function MessagesStackScreen() {
       <MessagesStack.Screen name="NewMessage" component={NewMessageScreen} options={{ presentation: 'modal' }} />
       <MessagesStack.Screen name="ChatInfo" component={ChatInfoScreen} />
       <MessagesStack.Screen name="NewGroup" component={NewGroupScreen} options={{ presentation: 'modal' }} />
+      <MessagesStack.Screen name="StaffProfile" component={StaffProfileScreen} />
     </MessagesStack.Navigator>
   );
 }
@@ -290,6 +292,7 @@ function ChannelsStackScreen() {
       <ChannelsStack.Screen name="ChannelInfo" component={ChannelInfoScreen} />
       <ChannelsStack.Screen name="DiscoverChannels" component={DiscoverChannelsScreen} />
       <ChannelsStack.Screen name="CreateChannel" component={CreateChannelScreen} />
+      <ChannelsStack.Screen name="StaffProfile" component={StaffProfileScreen} />
     </ChannelsStack.Navigator>
   );
 }
@@ -343,6 +346,7 @@ function MoreStackScreen() {
       <MoreStack.Screen name="ReportsDashboard" component={ReportsDashboardScreen} />
       <MoreStack.Screen name="Telehealth" component={TelehealthScreen} />
       <MoreStack.Screen name="TelehealthCall" component={TelehealthCallScreen} options={{ presentation: 'fullScreenModal', animation: 'fade' }} />
+      <MoreStack.Screen name="TelehealthCallSummary" component={TelehealthCallSummaryScreen} />
       {/* Stock & Inventory */}
       <MoreStack.Screen name="StockList" component={StockListScreen} />
       <MoreStack.Screen name="StockItemDetail" component={StockItemDetailScreen} />

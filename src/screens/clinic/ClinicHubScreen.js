@@ -1,7 +1,9 @@
-import React from 'react';
-import { View, ScrollView, Pressable, StyleSheet, FlatList } from 'react-native';
+import React, { useMemo } from 'react';
+import { View, ScrollView, Pressable, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -12,11 +14,10 @@ import { AppointmentCard } from '../../components/clinic/AppointmentCard';
 import { PatientCard } from '../../components/clinic/PatientCard';
 import { ClinicQuickAction } from '../../components/clinic/ClinicQuickAction';
 import { Divider } from '../../components/common/Divider';
-import { getTodaysAppointments, getPendingAppointmentsCount } from '../../data/mockAppointments';
-import { getRecentPatients } from '../../data/mockPatients';
-import { getTotalOutstanding, formatCurrency } from '../../data/mockInvoices';
-import { getPendingNotesCount } from '../../data/mockTreatmentNotes';
-import { getLowStockItems, getExpiringSoonItems, getExpiredItems } from '../../data/mockStock';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 const QUICK_STATS = [
   { key: 'appointments', icon: 'calendar', label: 'Today' },
@@ -27,19 +28,32 @@ const QUICK_STATS = [
 ];
 
 export default function ClinicHubScreen({ navigation }) {
-  const todaysAppointments = getTodaysAppointments().filter(a => a.status !== 'open');
-  const recentPatients = getRecentPatients(3);
-  const pendingNotes = getPendingNotesCount();
-  const outstanding = getTotalOutstanding();
-  const pendingApts = getPendingAppointmentsCount();
+  const todayStart = useMemo(() => { const d = new Date(); d.setHours(0,0,0,0); return d.getTime(); }, []);
+  const todayEnd = todayStart + 86400000;
 
-  const lowStockCount = getLowStockItems().length;
-  const expiringCount = getExpiringSoonItems().length + getExpiredItems().length;
+  const todaysAppts = useQuery(api.appointments.listByDateRange, { startFrom: todayStart, startTo: todayEnd });
+  const recentPatients = useQuery(api.patients.listRecent, { limit: 3 });
+  const pendingNotes = useQuery(api.treatmentNotes.pendingCount);
+  const outstanding = useQuery(api.invoices.outstandingTotal);
+  const stockAlerts = useQuery(api.stock.alerts);
+  const allPatients = useQuery(api.patients.list, {});
+
+  const todaysAppointments = useMemo(() =>
+    (todaysAppts ?? []).filter(a => a.status !== 'open'), [todaysAppts]);
+
+  const patientMap = useMemo(() => {
+    const map = {};
+    (allPatients ?? []).forEach(p => { map[p._id] = p; });
+    return map;
+  }, [allPatients]);
+
+  const lowStockCount = stockAlerts?.lowStockCount ?? 0;
+  const expiringCount = (stockAlerts?.expiringCount ?? 0) + (stockAlerts?.expiredCount ?? 0);
 
   const statValues = {
     appointments: todaysAppointments.length,
-    notes: pendingNotes,
-    invoices: outstanding > 0 ? formatCurrency(outstanding) : '0',
+    notes: pendingNotes ?? 0,
+    invoices: (outstanding ?? 0) > 0 ? formatCurrency(outstanding) : '0',
     lowStock: lowStockCount,
     expiring: expiringCount,
   };
@@ -88,9 +102,10 @@ export default function ClinicHubScreen({ navigation }) {
         {todaysAppointments.length > 0 ? (
           todaysAppointments.slice(0, 3).map(apt => (
             <AppointmentCard
-              key={apt.id}
+              key={apt._id}
               appointment={apt}
-              onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: apt.id })}
+              patient={apt.patientId ? patientMap[apt.patientId] : null}
+              onPress={() => navigation.navigate('AppointmentDetail', { appointmentId: apt._id })}
             />
           ))
         ) : (
@@ -162,13 +177,13 @@ export default function ClinicHubScreen({ navigation }) {
           action="View All"
           onAction={() => navigation.navigate('PatientDirectory')}
         />
-        {recentPatients.map((p, i) => (
-          <React.Fragment key={p.id}>
+        {(recentPatients ?? []).map((p, i) => (
+          <React.Fragment key={p._id}>
             <PatientCard
               patient={p}
-              onPress={() => navigation.navigate('PatientProfile', { patientId: p.id })}
+              onPress={() => navigation.navigate('PatientProfile', { patientId: p._id })}
             />
-            {i < recentPatients.length - 1 && <Divider type="inset" />}
+            {i < (recentPatients ?? []).length - 1 && <Divider type="inset" />}
           </React.Fragment>
         ))}
       </ScrollView>

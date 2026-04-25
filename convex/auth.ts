@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 // ── Queries ────────────────────────────────────────────────────────────
@@ -61,12 +61,67 @@ export const getStaffByDepartment = query({
   },
 });
 
+export const getStaffByUserId = query({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const account = await ctx.db
+      .query("staffAccounts")
+      .withIndex("by_userId", (q) => q.eq("userId", args.userId))
+      .first();
+    return account ?? null;
+  },
+});
+
 export const getAllStaffAccounts = query({
   args: {},
   handler: async (ctx) => {
     const accounts = await ctx.db.query("staffAccounts").collect();
     console.log(`[AUTH] getAllStaffAccounts: returned ${accounts.length} accounts`);
     return accounts;
+  },
+});
+
+// ── OTP Helpers ────────────────────────────────────────────────────────
+
+export const storeOTPCode = internalMutation({
+  args: { email: v.string() },
+  handler: async (ctx, { email }) => {
+    const account = await ctx.db
+      .query("staffAccounts")
+      .withIndex("by_email", (q) => q.eq("email", email.toLowerCase()))
+      .first();
+    if (!account || !account.isActive) throw new Error("Account not found");
+    const code = String(Math.floor(100000 + Math.random() * 900000));
+    const expiry = Date.now() + 10 * 60 * 1000; // 10 minutes
+    await ctx.db.patch(account._id, { verificationCode: code, otpExpiry: expiry });
+    console.log(`[AUTH] OTP stored for ${email} (expires in 10 min)`);
+    return {
+      code,
+      expiry,
+      name: account.displayName || account.fullName || email.split("@")[0],
+    };
+  },
+});
+
+export const verifyOTPCode = mutation({
+  args: { email: v.string(), code: v.string() },
+  handler: async (ctx, { email, code }) => {
+    const account = await ctx.db
+      .query("staffAccounts")
+      .withIndex("by_email", (q) => q.eq("email", email.toLowerCase()))
+      .first();
+    if (!account || !account.isActive) return { success: false, error: "Account not found" };
+    if (!account.verificationCode || account.verificationCode !== code) {
+      console.log(`[AUTH] ❌ OTP mismatch for ${email}`);
+      return { success: false, error: "Invalid verification code" };
+    }
+    if (!account.otpExpiry || Date.now() > account.otpExpiry) {
+      console.log(`[AUTH] ❌ OTP expired for ${email}`);
+      return { success: false, error: "This code has expired. Please request a new one." };
+    }
+    await ctx.db.patch(account._id, { verificationCode: undefined, otpExpiry: undefined });
+    console.log(`[AUTH] ✅ OTP verified for ${email}`);
+    return { success: true };
   },
 });
 
@@ -77,10 +132,9 @@ export const createStaffAccount = mutation({
     email: v.string(),
     role: v.string(),
     password: v.string(),
-    verificationCode: v.string(),
     createdBy: v.string(),
   },
-  handler: async (ctx, { email, role, password, verificationCode, createdBy }) => {
+  handler: async (ctx, { email, role, password, createdBy }) => {
     console.log(`[AUTH] 🆕 createStaffAccount: email=${email}, role=${role}, createdBy=${createdBy}`);
 
     // Check if an account with this email already exists
@@ -104,7 +158,7 @@ export const createStaffAccount = mutation({
       fullName: null,
       role,
       password,
-      verificationCode,
+      verificationCode: "",
       isActive: true,
       isOnboarded: false,
       trustedDevices: [],

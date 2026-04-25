@@ -2,22 +2,25 @@ import React from 'react';
 import { View, ScrollView, Pressable, StyleSheet, Linking } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { Card } from '../../components/common/Card';
 import { Divider } from '../../components/common/Divider';
-import { getSupplierById } from '../../data/mockSuppliers';
-import { mockStockItems, formatCurrency } from '../../data/mockStock';
-import { getUserById } from '../../data/mockUsers';
 import { formatTimestamp } from '../../utils/dateHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 export default function SupplierDetailScreen({ route, navigation }) {
   const { supplierId } = route.params;
-  const supplier = getSupplierById(supplierId);
-  const products = mockStockItems.filter(s => s.supplierId === supplierId);
-  const createdByUser = supplier ? getUserById(supplier.createdBy) : null;
+  const supplier = useQuery(api.suppliers.get, { id: supplierId });
+  const allStock = useQuery(api.stock.list, {}) ?? [];
+  const products = allStock.filter(s => s.supplierId === supplierId);
 
   if (!supplier) {
     return (
@@ -39,7 +42,7 @@ export default function SupplierDetailScreen({ route, navigation }) {
           <Feather name="chevron-left" size={24} color={colors.black} />
         </Pressable>
         <AppText variant="h2" style={styles.headerTitle}>Supplier</AppText>
-        <Pressable onPress={() => navigation.navigate('CreateEditSupplier', { supplierId: supplier.id })} hitSlop={8}>
+        <Pressable onPress={() => navigation.navigate('CreateEditSupplier', { supplierId: supplier._id })} hitSlop={8}>
           <Feather name="edit-2" size={20} color={colors.navyBlue} />
         </Pressable>
       </View>
@@ -80,7 +83,7 @@ export default function SupplierDetailScreen({ route, navigation }) {
             <AppText variant="body" color={colors.mediumGrey}>No products linked to this supplier</AppText>
           ) : (
             products.map(p => (
-              <Pressable key={p.id} style={styles.productRow} onPress={() => navigation.navigate('StockItemDetail', { stockItemId: p.id })}>
+              <Pressable key={p._id} style={styles.productRow} onPress={() => navigation.navigate('StockItemDetail', { stockItemId: p._id })}>
                 <View style={{ flex: 1 }}>
                   <AppText variant="body">{p.name}</AppText>
                   <AppText variant="small" color={colors.mediumGrey}>{p.itemCode} · {formatCurrency(p.pricePerItem)}/unit · Stock: {p.stockLevel}</AppText>
@@ -104,7 +107,7 @@ export default function SupplierDetailScreen({ route, navigation }) {
         {/* Audit */}
         <View style={styles.section}>
           <AppText variant="small" color={colors.mediumGrey}>
-            Added by {createdByUser?.displayName || 'Unknown'} · {formatTimestamp(supplier.createdAt)}
+            Added by {supplier.createdBy || 'Unknown'} · {formatTimestamp(supplier.createdAt)}
           </AppText>
         </View>
       </ScrollView>

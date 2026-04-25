@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useConvex } from 'convex/react';
+import { useConvex, useAction } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
@@ -12,6 +12,7 @@ import { Input } from '../../components/common/Input';
 
 export default function LoginScreen({ navigation }) {
   const convex = useConvex();
+  const sendOTPCode = useAction(api.notifications.sendOTPCode);
   const [email, setEmail] = useState('');
   const [error, setError] = useState('');
   const [isChecking, setIsChecking] = useState(false);
@@ -24,7 +25,13 @@ export default function LoginScreen({ navigation }) {
     try {
       const account = await convex.query(api.auth.getAccountByEmail, { email: email.trim() });
       if (!account) {
-        setError('No account found with this email address');
+        setError('No account found with this email address.');
+        setIsChecking(false);
+        return;
+      }
+      const result = await sendOTPCode({ email: account.email });
+      if (!result.success) {
+        setError(result.error || 'Failed to send verification code. Please try again.');
         setIsChecking(false);
         return;
       }
@@ -67,7 +74,7 @@ export default function LoginScreen({ navigation }) {
         ) : null}
 
         <Button
-          label={isChecking ? 'Checking...' : 'Send Verification Code'}
+          label={isChecking ? 'Sending code...' : 'Send Verification Code'}
           onPress={handleContinue}
           disabled={!isValid || isChecking}
           style={styles.submitBtn}

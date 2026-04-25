@@ -1,26 +1,51 @@
-import React, { useState } from 'react';
-import { View, FlatList, Pressable, StyleSheet } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { shadows } from '../../constants/shadows';
 import { AppText } from '../../components/common/AppText';
 import { SearchBar } from '../../components/common/SearchBar';
-import { mockExpenses, getExpensesSummary, getCategoryLabel, getCategoryIcon, getCategoryColor, EXPENSE_CATEGORIES } from '../../data/mockExpenses';
-import { formatCurrency } from '../../data/mockInvoices';
 import { formatTimestamp } from '../../utils/dateHelpers';
+import { exportExpensesCSV } from '../../utils/documentHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+const EXPENSE_CATEGORIES = [
+  { key: 'medical_supplies', label: 'Medical Supplies', icon: 'heart', color: colors.error },
+  { key: 'equipment', label: 'Equipment', icon: 'tool', color: colors.navyBlue },
+  { key: 'utilities', label: 'Utilities', icon: 'zap', color: colors.warning },
+  { key: 'rent', label: 'Rent', icon: 'home', color: colors.peach },
+  { key: 'salaries', label: 'Salaries', icon: 'users', color: colors.success },
+  { key: 'other', label: 'Other', icon: 'more-horizontal', color: colors.mediumGrey },
+];
+function getCategoryLabel(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.label || key; }
+function getCategoryIcon(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.icon || 'more-horizontal'; }
+function getCategoryColor(key) { return EXPENSE_CATEGORIES.find(c => c.key === key)?.color || colors.mediumGrey; }
 
 const FILTERS = ['All', ...EXPENSE_CATEGORIES.slice(0, 3).map(c => c.label)];
 
 export default function ExpensesListScreen({ navigation }) {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
-  const summary = getExpensesSummary();
+  const [exporting, setExporting] = useState(false);
 
-  const getFiltered = () => {
-    let items = [...mockExpenses];
+  const handleExport = async () => {
+    setExporting(true);
+    await exportExpensesCSV(expenses);
+    setExporting(false);
+  };
+  const allExpenses = useQuery(api.expenses.list, {}) ?? [];
+  const summary = useQuery(api.expenses.summary) ?? { total: 0, count: 0 };
+
+  const expenses = useMemo(() => {
+    let items = [...allExpenses];
     if (filter !== 'All') {
       const cat = EXPENSE_CATEGORIES.find(c => c.label === filter);
       if (cat) items = items.filter(e => e.category === cat.key);
@@ -30,14 +55,12 @@ export default function ExpensesListScreen({ navigation }) {
       items = items.filter(e => e.description.toLowerCase().includes(q) || e.vendorName?.toLowerCase().includes(q));
     }
     return items.sort((a, b) => b.date - a.date);
-  };
-
-  const expenses = getFiltered();
+  }, [allExpenses, filter, search]);
 
   const renderItem = ({ item }) => {
     const catColor = getCategoryColor(item.category);
     return (
-      <Pressable style={styles.expCard} onPress={() => navigation.navigate('ExpenseDetail', { expenseId: item.id })}>
+      <Pressable style={styles.expCard} onPress={() => navigation.navigate('ExpenseDetail', { expenseId: item._id })}>
         <View style={[styles.catIcon, { backgroundColor: catColor + '14' }]}>
           <Feather name={getCategoryIcon(item.category)} size={16} color={catColor} />
         </View>
@@ -46,10 +69,10 @@ export default function ExpensesListScreen({ navigation }) {
           <AppText variant="caption" color={colors.darkGrey}>{getCategoryLabel(item.category)} · {item.vendorName || 'No vendor'}</AppText>
           <View style={styles.expMeta}>
             <AppText variant="small" color={colors.mediumGrey}>{formatTimestamp(item.date)}</AppText>
-            {item.attachments.length > 0 && (
+            {(item.attachments?.length ?? 0) > 0 && (
               <View style={styles.attachBadge}>
                 <Feather name="paperclip" size={10} color={colors.mediumGrey} />
-                <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: 2 }}>{item.attachments.length}</AppText>
+                <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: 2 }}>{item.attachments?.length}</AppText>
               </View>
             )}
           </View>
@@ -66,14 +89,16 @@ export default function ExpensesListScreen({ navigation }) {
           <Feather name="chevron-left" size={24} color={colors.black} />
         </Pressable>
         <AppText variant="h2" style={styles.headerTitle}>Expenses</AppText>
-        <View style={{ width: 24 }} />
+        <Pressable onPress={handleExport} hitSlop={8} disabled={exporting}>
+          {exporting ? <ActivityIndicator size="small" color={colors.navyBlue} /> : <Feather name="download" size={22} color={colors.navyBlue} />}
+        </Pressable>
       </View>
 
       {/* Total */}
       <View style={styles.totalCard}>
         <AppText variant="caption" color={colors.mediumGrey}>Total Expenses</AppText>
         <AppText variant="h1" color={colors.error}>{formatCurrency(summary.total)}</AppText>
-        <AppText variant="small" color={colors.mediumGrey}>{mockExpenses.length} entries this period</AppText>
+        <AppText variant="small" color={colors.mediumGrey}>{allExpenses.length} entries this period</AppText>
       </View>
 
       <View style={{ paddingHorizontal: spacing.base }}>
@@ -90,7 +115,7 @@ export default function ExpensesListScreen({ navigation }) {
 
       <FlatList
         data={expenses}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={renderItem}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: TAB_BAR_HEIGHT }}
         ListEmptyComponent={<AppText variant="body" color={colors.mediumGrey} style={{ padding: spacing.xl, textAlign: 'center' }}>No expenses found</AppText>}

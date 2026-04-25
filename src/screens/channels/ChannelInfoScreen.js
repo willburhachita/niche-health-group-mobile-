@@ -22,6 +22,12 @@ export default function ChannelInfoScreen({ navigation, route }) {
     return m;
   }, [allUsers]);
 
+  // Only show members that resolve to actual users
+  const activeMembers = React.useMemo(
+    () => (channel?.members || []).filter(mId => userMap[mId]),
+    [channel?.members, userMap]
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
       <View style={styles.header}>
@@ -51,15 +57,16 @@ export default function ChannelInfoScreen({ navigation, route }) {
 
         <Divider style={{ marginVertical: spacing.base }} />
 
-        <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>MEMBERS ({channel?.memberCount})</AppText>
-        {channel?.members?.map(mId => {
+        <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>MEMBERS ({activeMembers.length})</AppText>
+        {activeMembers.map(mId => {
           const user = userMap[mId];
           return (
-            <View key={mId} style={styles.memberRow}>
-              <Avatar name={user?.displayName || mId} size={36} showOnline onlineStatus={user?.onlineStatus} />
-              <AppText variant="body" style={{ flex: 1, marginLeft: spacing.md }}>{user?.displayName || 'Former staff'}</AppText>
+            <Pressable key={mId} style={styles.memberRow} onPress={() => navigation.navigate('StaffProfile', { userId: mId })}>
+              <Avatar name={user.displayName} size={36} showOnline onlineStatus={user.onlineStatus} />
+              <AppText variant="body" style={{ flex: 1, marginLeft: spacing.md }}>{user.displayName}</AppText>
               {channel?.admins?.includes(mId) && <AppText variant="small" color={colors.navyBlue}>Admin</AppText>}
-            </View>
+              <Feather name="chevron-right" size={16} color={colors.lightGrey} style={{ marginLeft: spacing.sm }} />
+            </Pressable>
           );
         })}
 

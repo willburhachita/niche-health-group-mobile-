@@ -8,6 +8,15 @@ import { getUserById } from '../../data/mockUsers';
 import { formatTimestamp } from '../../utils/dateHelpers';
 import { truncate } from '../../utils/formatters';
 
+const formatPreview = (conversation) => {
+  const t = conversation.lastMessageType;
+  if (t === 'voice') return '🎤 Voice note';
+  if (t === 'image') return '📷 Photo';
+  if (t === 'file') return '📎 Document';
+  if (t === 'location') return '📍 Location';
+  return truncate(conversation.lastMessage, 45);
+};
+
 export const ConversationItem = ({ conversation, currentUserId, onPress }) => {
   const isGroup = conversation.type === 'group';
   const otherMemberId = !isGroup ? conversation.members.find(m => m !== currentUserId) : null;
@@ -28,7 +37,7 @@ export const ConversationItem = ({ conversation, currentUserId, onPress }) => {
         </View>
         <View style={styles.bottomRow}>
           <AppText variant="body" color={colors.darkGrey} numberOfLines={1} style={styles.preview}>
-            {truncate(conversation.lastMessage, 45)}
+            {formatPreview(conversation)}
           </AppText>
           {conversation.unreadBy?.[currentUserId] === true && <View style={styles.unreadDot} />}
         </View>

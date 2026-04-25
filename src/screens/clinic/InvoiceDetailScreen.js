@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, Modal, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, Modal, ActivityIndicator, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -8,14 +8,27 @@ import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { useAlert } from '../../components/common/CustomAlert';
 import { Avatar } from '../../components/common/Avatar';
-import { Card } from '../../components/common/Card';
 import { Button } from '../../components/common/Button';
 import { Divider } from '../../components/common/Divider';
-import { getInvoiceById, formatCurrency } from '../../data/mockInvoices';
-import { getPatientById } from '../../data/mockPatients';
+import { useQuery, useMutation, useAction } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
 import { formatDate, formatTimestamp } from '../../utils/dateHelpers';
 import { Input } from '../../components/common/Input';
-import { PAYMENT_METHODS } from '../../data/mockPayments';
+import { buildInvoiceHTML, downloadInvoicePDF } from '../../utils/documentHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+const PAYMENT_METHODS = [
+  { key: 'cash', label: 'Cash', icon: 'dollar-sign' },
+  { key: 'mobile_money', label: 'Mobile Money', icon: 'smartphone' },
+  { key: 'card', label: 'Card', icon: 'credit-card' },
+  { key: 'nhima', label: 'NHIMA Insurance', icon: 'shield' },
+  { key: 'bank_transfer', label: 'Bank Transfer', icon: 'briefcase' },
+  { key: 'cheque', label: 'Cheque', icon: 'file-text' },
+];
 
 const statusStyles = {
   paid: { color: colors.success, bg: colors.success + '14', label: 'Paid' },
@@ -26,21 +39,107 @@ const statusStyles = {
 export default function InvoiceDetailScreen({ route, navigation }) {
   const { invoiceId } = route.params;
   const alert = useAlert();
-  const invoice = getInvoiceById(invoiceId);
-  const patient = invoice ? getPatientById(invoice.patientId) : null;
+  const { currentAccount } = useAuth();
+  const invoice = useQuery(api.invoices.get, { id: invoiceId });
+  const patient = useQuery(api.patients.get, invoice?.patientId ? { id: invoice.patientId } : 'skip');
+  const appointment = useQuery(api.appointments.get, invoice?.appointmentId ? { id: invoice.appointmentId } : 'skip');
+  const creator = useQuery(api.auth.getStaffByUserId, invoice?.createdBy ? { userId: invoice.createdBy } : 'skip');
+  const recordPayment = useMutation(api.paymentsClinic.create);
+  const markAsPaid = useMutation(api.invoices.markAsPaid);
+  const sendEmail = useAction(api.notifications.sendInvoiceEmail);
   const status = statusStyles[invoice?.status] || statusStyles.unpaid;
   const [showPayModal, setShowPayModal] = useState(false);
   const [payAmount, setPayAmount] = useState('');
   const [payMethod, setPayMethod] = useState(null);
   const [payRef, setPayRef] = useState('');
+  const [pdfLoading, setPdfLoading] = useState(false);
+  const [emailLoading, setEmailLoading] = useState(false);
+  const [showPaidConfirm, setShowPaidConfirm] = useState(false);
 
-  const handleRecordPayment = () => {
+  const creatorName = creator
+    ? (creator.title ? `${creator.title} ` : '') + (creator.displayName || creator.fullName || creator.email)
+    : invoice?.createdBy || 'Staff';
+
+  const handleRecordPayment = async () => {
     if (!payAmount || !payMethod) {
       alert({ type: 'warning', title: 'Required', message: 'Enter amount and select payment method.' });
       return;
     }
-    const methodLabel = PAYMENT_METHODS.find(m => m.key === payMethod)?.label || payMethod;
-    alert({ type: 'success', title: 'Payment Recorded', message: `${formatCurrency(parseFloat(payAmount))} via ${methodLabel}`, buttons: [{ label: 'OK', onPress: () => { setShowPayModal(false); setPayAmount(''); setPayMethod(null); setPayRef(''); } }] });
+    try {
+      await recordPayment({
+        invoiceId,
+        patientId: invoice.patientId,
+        amount: parseFloat(payAmount),
+        method: payMethod,
+        referenceNumber: payRef || undefined,
+        recordedBy: currentAccount?.userId || 'unknown',
+      });
+      const methodLabel = PAYMENT_METHODS.find(m => m.key === payMethod)?.label || payMethod;
+      alert({ type: 'success', title: 'Payment Recorded', message: `${formatCurrency(parseFloat(payAmount))} via ${methodLabel}`, buttons: [{ label: 'OK', onPress: () => { setShowPayModal(false); setPayAmount(''); setPayMethod(null); setPayRef(''); } }] });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to record payment.' });
+    }
+  };
+
+  const handleMarkAsPaid = async () => {
+    setShowPaidConfirm(false);
+    try {
+      await markAsPaid({ id: invoiceId, markedBy: currentAccount?.userId || 'unknown' });
+      alert({ type: 'success', title: 'Invoice Paid', message: `${invoice.invoiceNumber} has been marked as paid. This cannot be undone.` });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to mark as paid.' });
+    }
+  };
+
+  const handleDownloadPDF = async () => {
+    if (!invoice) return;
+    setPdfLoading(true);
+    try {
+      const html = buildInvoiceHTML({
+        invoice,
+        patient,
+        lineItems: invoice.lineItems,
+        payments: invoice.payments,
+        appointment,
+        creatorName,
+      });
+      const result = await downloadInvoicePDF(html, invoice.invoiceNumber);
+      if (!result.success) {
+        alert({ type: 'warning', title: 'PDF Error', message: result.error || 'Could not generate PDF.' });
+      }
+    } finally {
+      setPdfLoading(false);
+    }
+  };
+
+  const handleSendEmail = async () => {
+    if (!patient?.email) {
+      alert({ type: 'warning', title: 'No Email', message: 'This patient does not have an email address on file.' });
+      return;
+    }
+    setEmailLoading(true);
+    try {
+      const summary = (invoice.lineItems ?? []).map(i => i.description).join(', ');
+      const result = await sendEmail({
+        toEmail: patient.email,
+        toName: patient.displayName,
+        invoiceNumber: invoice.invoiceNumber,
+        patientName: patient.displayName,
+        total: invoice.total,
+        dueDate: invoice.dueDate,
+        lineItemsSummary: summary,
+        notes: invoice.notes || undefined,
+      });
+      if (result.success) {
+        alert({ type: 'success', title: 'Email Sent', message: `Invoice sent to ${patient.email}` });
+      } else {
+        alert({ type: 'warning', title: 'Email Failed', message: result.error || 'Could not send email.' });
+      }
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to send email.' });
+    } finally {
+      setEmailLoading(false);
+    }
   };
 
   if (!invoice) {
@@ -68,6 +167,7 @@ export default function InvoiceDetailScreen({ route, navigation }) {
         <View style={{ width: 24 }} />
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: TAB_BAR_HEIGHT }}>
         {/* Status Banner */}
         <View style={[styles.statusBanner, { backgroundColor: status.bg }]}>
@@ -79,15 +179,30 @@ export default function InvoiceDetailScreen({ route, navigation }) {
         {patient && (
           <Pressable
             style={styles.patientCard}
-            onPress={() => navigation.navigate('PatientProfile', { patientId: patient.id })}
+            onPress={() => navigation.navigate('PatientProfile', { patientId: patient._id })}
           >
             <Avatar name={patient.displayName} size={40} />
             <View style={{ flex: 1, marginLeft: spacing.md }}>
               <AppText variant="bodyBold">{patient.displayName}</AppText>
-              <AppText variant="caption" color={colors.darkGrey}>{patient.patientId} · {patient.phone}</AppText>
+              <AppText variant="caption" color={colors.darkGrey}>{patient.patientCode} · {patient.phone}</AppText>
             </View>
             <Feather name="chevron-right" size={16} color={colors.lightGrey} />
           </Pressable>
+        )}
+
+        {/* Linked Appointment */}
+        {appointment && (
+          <View style={styles.appointmentCard}>
+            <View style={styles.aptBadge}>
+              <Feather name="calendar" size={14} color={colors.navyBlue} />
+            </View>
+            <View style={{ flex: 1, marginLeft: spacing.sm }}>
+              <AppText variant="bodyBold">{appointment.type || 'Appointment'}</AppText>
+              <AppText variant="small" color={colors.mediumGrey}>
+                {formatDate(appointment.startTime)} · {appointment.status}
+              </AppText>
+            </View>
+          </View>
         )}
 
         {/* Line Items */}
@@ -103,7 +218,15 @@ export default function InvoiceDetailScreen({ route, navigation }) {
           {invoice.lineItems.map((item, i) => (
             <View key={i}>
               <View style={styles.tableRow}>
-                <AppText variant="body" style={styles.colDesc} numberOfLines={2}>{item.description}</AppText>
+                <View style={styles.colDesc}>
+                  <AppText variant="body" numberOfLines={2}>{item.description}</AppText>
+                  {item.stockItemId && (
+                    <View style={styles.stockTag}>
+                      <Feather name="package" size={10} color={colors.success} />
+                      <AppText variant="small" color={colors.success} style={{ marginLeft: 2 }}>Stock deducted</AppText>
+                    </View>
+                  )}
+                </View>
                 <AppText variant="body" style={styles.colQty}>{item.quantity}</AppText>
                 <AppText variant="body" style={styles.colPrice}>{formatCurrency(item.unitPrice)}</AppText>
                 <AppText variant="bodyBold" style={styles.colTotal}>{formatCurrency(item.total)}</AppText>
@@ -156,10 +279,10 @@ export default function InvoiceDetailScreen({ route, navigation }) {
           </View>
         )}
 
-        {/* Created By (Ownership) */}
+        {/* Created By */}
         <View style={styles.section}>
           <AppText variant="small" color={colors.mediumGrey}>
-            Created by Dr. Sarah Mbewe · {formatTimestamp(invoice.createdAt)}
+            Created by {creatorName} · {formatTimestamp(invoice.createdAt)}
           </AppText>
         </View>
 
@@ -168,10 +291,47 @@ export default function InvoiceDetailScreen({ route, navigation }) {
           {(invoice.status === 'unpaid' || invoice.status === 'overdue') && (
             <Button label="Record Payment" onPress={() => setShowPayModal(true)} />
           )}
-          <Button label="Send to Patient" variant="secondary" onPress={() => alert({ type: 'success', title: 'Sent', message: 'Invoice sent to patient.' })} />
-          <Button label="Download PDF" variant="tertiary" onPress={() => alert({ type: 'info', title: 'PDF', message: 'PDF downloaded (demo).' })} />
+          {(invoice.status === 'unpaid' || invoice.status === 'overdue') && (
+            <Pressable style={styles.markPaidBtn} onPress={() => setShowPaidConfirm(true)}>
+              <Feather name="check-circle" size={16} color={colors.success} />
+              <AppText variant="bodyBold" color={colors.success} style={{ marginLeft: spacing.sm }}>Mark as Paid</AppText>
+            </Pressable>
+          )}
+          <Pressable style={styles.actionRow} onPress={handleSendEmail} disabled={emailLoading}>
+            <Feather name="mail" size={16} color={colors.navyBlue} />
+            {emailLoading
+              ? <ActivityIndicator size="small" color={colors.navyBlue} style={{ marginLeft: spacing.sm }} />
+              : <AppText variant="bodyBold" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Send to Patient</AppText>}
+            {patient?.email && <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: 'auto' }}>{patient.email}</AppText>}
+          </Pressable>
+          <Pressable style={styles.actionRow} onPress={handleDownloadPDF} disabled={pdfLoading}>
+            <Feather name="download" size={16} color={colors.darkGrey} />
+            {pdfLoading
+              ? <ActivityIndicator size="small" color={colors.darkGrey} style={{ marginLeft: spacing.sm }} />
+              : <AppText variant="bodyBold" color={colors.darkGrey} style={{ marginLeft: spacing.sm }}>Download PDF</AppText>}
+          </Pressable>
         </View>
+
+        {/* Paid Confirmation Modal */}
+        <Modal visible={showPaidConfirm} animationType="fade" transparent>
+          <View style={styles.modalOverlay}>
+            <View style={[styles.modalContent, { borderRadius: radius.xl }]}>
+              <View style={styles.paidConfirmIcon}>
+                <Feather name="alert-triangle" size={32} color={colors.warning} />
+              </View>
+              <AppText variant="h2" style={{ textAlign: 'center', marginTop: spacing.md }}>Mark as Paid?</AppText>
+              <AppText variant="body" color={colors.darkGrey} style={{ textAlign: 'center', marginTop: spacing.sm, marginBottom: spacing.xl }}>
+                This will permanently mark {invoice.invoiceNumber} as paid. This action cannot be undone.
+              </AppText>
+              <Button label="Confirm - Mark as Paid" onPress={handleMarkAsPaid} />
+              <Pressable style={{ marginTop: spacing.md, alignItems: 'center' }} onPress={() => setShowPaidConfirm(false)}>
+                <AppText variant="body" color={colors.mediumGrey}>Cancel</AppText>
+              </Pressable>
+            </View>
+          </View>
+        </Modal>
       </ScrollView>
+      </KeyboardAvoidingView>
 
       {/* Record Payment Modal */}
       <Modal visible={showPayModal} animationType="slide" transparent>
@@ -290,9 +450,60 @@ const styles = StyleSheet.create({
   paymentIcon: {
     marginRight: spacing.md,
   },
+  appointmentCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginHorizontal: spacing.base,
+    padding: spacing.md,
+    backgroundColor: colors.navyLight,
+    borderRadius: radius.md,
+    marginBottom: spacing.base,
+  },
+  aptBadge: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.white,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  stockTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 2,
+  },
   actions: {
     paddingHorizontal: spacing.base,
     gap: spacing.sm,
+    marginTop: spacing.md,
+    marginBottom: spacing.xl,
+  },
+  markPaidBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing.md,
+    borderRadius: radius.md,
+    borderWidth: 1.5,
+    borderColor: colors.success,
+    backgroundColor: colors.success + '10',
+  },
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.base,
+    backgroundColor: colors.offWhite,
+    borderRadius: radius.md,
+  },
+  paidConfirmIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: colors.warning + '15',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
     marginTop: spacing.md,
   },
   modalOverlay: {

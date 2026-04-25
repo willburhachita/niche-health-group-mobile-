@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { View, FlatList, Pressable, StyleSheet } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -9,8 +11,11 @@ import { shadows } from '../../constants/shadows';
 import { AppText } from '../../components/common/AppText';
 import { SearchBar } from '../../components/common/SearchBar';
 import { Badge } from '../../components/common/Badge';
-import { mockStockItems, searchStockItems, getLowStockItems, getExpiringSoonItems, getExpiredItems, getOutOfStockItems, formatCurrency } from '../../data/mockStock';
-import { getSupplierById } from '../../data/mockSuppliers';
+import { exportStockCSV } from '../../utils/documentHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 const FILTERS = ['All', 'Low Stock', 'Expiring', 'Out of Stock'];
 
@@ -34,34 +39,44 @@ function getExpiryLabel(expiryDate) {
 export default function StockListScreen({ navigation }) {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
+  const [exporting, setExporting] = useState(false);
 
-  const getFilteredItems = () => {
-    let items = search.length > 0 ? searchStockItems(search) : mockStockItems;
+  const handleExport = async () => {
+    setExporting(true);
+    await exportStockCSV(items);
+    setExporting(false);
+  };
+
+  const allItems = useQuery(api.stock.list, {});
+  const searchResults = useQuery(api.stock.search, { query: search });
+  const stockAlerts = useQuery(api.stock.alerts);
+
+  const items = useMemo(() => {
+    let list = search.length > 0 ? (searchResults ?? []) : (allItems ?? []);
     switch (filter) {
-      case 'Low Stock': return items.filter(i => i.stockLevel <= i.reorderLevel && i.stockLevel > 0);
-      case 'Expiring': return items.filter(i => {
+      case 'Low Stock': return list.filter(i => i.stockLevel <= i.reorderLevel && i.stockLevel > 0);
+      case 'Expiring': return list.filter(i => {
         if (!i.expiryDate) return false;
         const daysLeft = Math.ceil((i.expiryDate - Date.now()) / 86400000);
         return daysLeft > 0 && daysLeft <= 90;
       });
-      case 'Out of Stock': return items.filter(i => i.stockLevel === 0);
-      default: return items.filter(i => i.status === 'active');
+      case 'Out of Stock': return list.filter(i => i.stockLevel === 0);
+      default: return list.filter(i => i.status === 'active');
     }
-  };
+  }, [allItems, searchResults, filter, search]);
 
-  const items = getFilteredItems();
-  const lowCount = getLowStockItems().length;
-  const expiringCount = getExpiringSoonItems().length + getExpiredItems().length;
+  const lowCount = stockAlerts?.lowStockCount ?? 0;
+  const expiringCount = (stockAlerts?.expiringCount ?? 0) + (stockAlerts?.expiredCount ?? 0);
 
   const renderItem = ({ item }) => {
-    const supplier = getSupplierById(item.supplierId);
+    const supplier = null; // supplier lookup deferred
     const stockColor = getStockColor(item);
     const expiry = getExpiryLabel(item.expiryDate);
 
     return (
       <Pressable
         style={styles.itemCard}
-        onPress={() => navigation.navigate('StockItemDetail', { stockItemId: item.id })}
+        onPress={() => navigation.navigate('StockItemDetail', { stockItemId: item._id })}
       >
         <View style={styles.itemTop}>
           <View style={{ flex: 1 }}>
@@ -93,7 +108,9 @@ export default function StockListScreen({ navigation }) {
           <Feather name="chevron-left" size={24} color={colors.black} />
         </Pressable>
         <AppText variant="h2" style={styles.headerTitle}>Stock & Inventory</AppText>
-        <View style={{ width: 24 }} />
+        <Pressable onPress={handleExport} hitSlop={8} disabled={exporting}>
+          {exporting ? <ActivityIndicator size="small" color={colors.navyBlue} /> : <Feather name="download" size={22} color={colors.navyBlue} />}
+        </Pressable>
       </View>
 
       <View style={styles.alertRow}>
@@ -125,7 +142,7 @@ export default function StockListScreen({ navigation }) {
 
       <FlatList
         data={items}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={renderItem}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: TAB_BAR_HEIGHT }}
         ListEmptyComponent={<AppText variant="body" color={colors.mediumGrey} style={{ padding: spacing.xl, textAlign: 'center' }}>No items found</AppText>}

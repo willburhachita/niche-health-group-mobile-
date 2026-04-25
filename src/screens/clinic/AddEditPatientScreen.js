@@ -1,7 +1,11 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, Switch, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, Switch, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
+import { CalendarDatePicker } from '../../components/common/CalendarDatePicker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -10,14 +14,17 @@ import { useAlert } from '../../components/common/CustomAlert';
 import { Input } from '../../components/common/Input';
 import { Button } from '../../components/common/Button';
 import { Divider } from '../../components/common/Divider';
-import { getPatientById } from '../../data/mockPatients';
 
 const GENDERS = ['Male', 'Female', 'Other'];
 
 export default function AddEditPatientScreen({ route, navigation }) {
   const alert = useAlert();
+  const { currentAccount } = useAuth();
   const patientId = route?.params?.patientId;
-  const existing = patientId ? getPatientById(patientId) : null;
+  const existing = useQuery(api.patients.get, patientId ? { id: patientId } : 'skip');
+  const nextCode = useQuery(api.patients.getNextPatientCode);
+  const createPatient = useMutation(api.patients.create);
+  const updatePatient = useMutation(api.patients.update);
   const isEdit = !!existing;
 
   const [firstName, setFirstName] = useState(existing?.firstName || '');
@@ -31,9 +38,9 @@ export default function AddEditPatientScreen({ route, navigation }) {
   const [bloodType, setBloodType] = useState(existing?.bloodType || '');
   const [insuranceProvider, setInsuranceProvider] = useState(existing?.insuranceProvider || '');
   const [policyNumber, setPolicyNumber] = useState(existing?.policyNumber || '');
-  const [ecName, setEcName] = useState(existing?.emergencyContact?.name || '');
-  const [ecPhone, setEcPhone] = useState(existing?.emergencyContact?.phone || '');
-  const [ecRelationship, setEcRelationship] = useState(existing?.emergencyContact?.relationship || '');
+  const [ecName, setEcName] = useState(existing?.emergencyContactName || '');
+  const [ecPhone, setEcPhone] = useState(existing?.emergencyContactPhone || '');
+  const [ecRelationship, setEcRelationship] = useState(existing?.emergencyContactRelationship || '');
   // NHIMA
   const [nhimaMemberNo, setNhimaMemberNo] = useState(existing?.nhimaMemberNo || '');
   const [nhimaScheme, setNhimaScheme] = useState(existing?.nhimaScheme || '');
@@ -45,7 +52,10 @@ export default function AddEditPatientScreen({ route, navigation }) {
   const [prefEmail, setPrefEmail] = useState(false);
   const [prefPhone, setPrefPhone] = useState(false);
 
-  const handleSave = () => {
+  const [showDobPicker, setShowDobPicker] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const handleSave = async () => {
     if (!firstName.trim() || !lastName.trim()) {
       alert({ type: 'warning', title: 'Required', message: 'First name and last name are required.' });
       return;
@@ -54,8 +64,55 @@ export default function AddEditPatientScreen({ route, navigation }) {
       alert({ type: 'warning', title: 'Consent Required', message: 'Privacy policy and data access consent must be accepted for new patients.' });
       return;
     }
-    const label = isEdit ? 'Updated' : 'Registered';
-    alert({ type: 'success', title: `Patient ${label}`, message: `${firstName} ${lastName} has been ${label.toLowerCase()}.`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
+    setSaving(true);
+    try {
+      if (isEdit) {
+        await updatePatient({
+          id: patientId,
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          dateOfBirth: dob,
+          gender,
+          phone,
+          email: email || undefined,
+          allergies: allergies ? allergies.split(',').map(s => s.trim()).filter(Boolean) : [],
+          conditions: conditions ? conditions.split(',').map(s => s.trim()).filter(Boolean) : [],
+          bloodType: bloodType || undefined,
+          insuranceProvider: insuranceProvider || undefined,
+          policyNumber: policyNumber || undefined,
+          emergencyContactName: ecName || undefined,
+          emergencyContactPhone: ecPhone || undefined,
+          emergencyContactRelationship: ecRelationship || undefined,
+        });
+      } else {
+        await createPatient({
+          patientCode: nextCode || 'PT-001',
+          firstName: firstName.trim(),
+          lastName: lastName.trim(),
+          dateOfBirth: dob,
+          gender,
+          phone,
+          email: email || undefined,
+          allergies: allergies ? allergies.split(',').map(s => s.trim()).filter(Boolean) : [],
+          conditions: conditions ? conditions.split(',').map(s => s.trim()).filter(Boolean) : [],
+          medications: [],
+          bloodType: bloodType || undefined,
+          insuranceProvider: insuranceProvider || undefined,
+          policyNumber: policyNumber || undefined,
+          emergencyContactName: ecName || undefined,
+          emergencyContactPhone: ecPhone || undefined,
+          emergencyContactRelationship: ecRelationship || undefined,
+          department: 'General',
+          createdBy: currentAccount?.userId || 'unknown',
+        });
+      }
+      const label = isEdit ? 'Updated' : 'Registered';
+      alert({ type: 'success', title: `Patient ${label}`, message: `${firstName} ${lastName} has been ${label.toLowerCase()}.`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to save patient.' });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -72,6 +129,7 @@ export default function AddEditPatientScreen({ route, navigation }) {
         </Pressable>
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Avatar */}
         <View style={styles.avatarSection}>
@@ -87,7 +145,22 @@ export default function AddEditPatientScreen({ route, navigation }) {
         <AppText variant="caption" color={colors.mediumGrey} style={styles.sectionLabel}>PERSONAL</AppText>
         <Input label="First Name" placeholder="Enter first name" value={firstName} onChangeText={setFirstName} />
         <Input label="Last Name" placeholder="Enter last name" value={lastName} onChangeText={setLastName} />
-        <Input label="Date of Birth" placeholder="YYYY-MM-DD" value={dob} onChangeText={setDob} icon="calendar" />
+        <AppText variant="bodyBold" style={styles.fieldLabel}>Date of Birth</AppText>
+        <Pressable style={styles.dateBtn} onPress={() => setShowDobPicker(true)}>
+          <Feather name="calendar" size={18} color={colors.navyBlue} style={{ marginRight: spacing.sm }} />
+          <AppText variant="body" color={dob ? colors.black : colors.mediumGrey} style={{ flex: 1 }}>
+            {dob || 'Select date of birth'}
+          </AppText>
+          <Feather name="chevron-down" size={16} color={colors.mediumGrey} />
+        </Pressable>
+        <CalendarDatePicker
+          visible={showDobPicker}
+          selectedDate={dob}
+          onSelect={(date) => { setDob(date); setShowDobPicker(false); }}
+          onClose={() => setShowDobPicker(false)}
+          minYear={1920}
+          maxYear={new Date().getFullYear()}
+        />
 
         <AppText variant="bodyBold" style={styles.fieldLabel}>Gender</AppText>
         <View style={styles.genderRow}>
@@ -191,6 +264,7 @@ export default function AddEditPatientScreen({ route, navigation }) {
         <Button label={isEdit ? 'Update Patient' : 'Register Patient'} onPress={handleSave} />
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -279,5 +353,16 @@ const styles = StyleSheet.create({
   checkboxActive: {
     backgroundColor: colors.navyBlue,
     borderColor: colors.navyBlue,
+  },
+  dateBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 52,
+    paddingHorizontal: spacing.base,
+    borderWidth: 1.5,
+    borderColor: colors.lightGrey,
+    borderRadius: radius.md,
+    backgroundColor: colors.white,
+    marginBottom: spacing.sm,
   },
 });

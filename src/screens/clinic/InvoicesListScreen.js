@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, FlatList, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -10,21 +12,33 @@ import { Card } from '../../components/common/Card';
 import { EmptyState } from '../../components/common/EmptyState';
 import { Divider } from '../../components/common/Divider';
 import { InvoiceItem } from '../../components/clinic/InvoiceItem';
-import { mockInvoices, getTotalOutstanding, getOverdueInvoices, formatCurrency } from '../../data/mockInvoices';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 const FILTERS = ['All', 'Unpaid', 'Overdue', 'Paid'];
 
 export default function InvoicesListScreen({ navigation }) {
   const [activeFilter, setActiveFilter] = useState('All');
 
-  const getFiltered = () => {
-    if (activeFilter === 'All') return mockInvoices;
-    return mockInvoices.filter(inv => inv.status === activeFilter.toLowerCase());
-  };
+  const allInvoices = useQuery(api.invoices.list, {}) ?? [];
+  const outstanding = useQuery(api.invoices.outstandingTotal) ?? 0;
+  const patients = useQuery(api.patients.list, {}) ?? [];
 
-  const invoices = getFiltered();
-  const totalOutstanding = getTotalOutstanding();
-  const overdueCount = getOverdueInvoices().length;
+  const patientMap = useMemo(() => {
+    const m = {};
+    patients.forEach(p => { m[p._id] = p; });
+    return m;
+  }, [patients]);
+
+  const invoices = useMemo(() => {
+    if (activeFilter === 'All') return allInvoices;
+    return allInvoices.filter(inv => inv.status === activeFilter.toLowerCase());
+  }, [allInvoices, activeFilter]);
+
+  const totalOutstanding = outstanding;
+  const overdueCount = allInvoices.filter(inv => inv.status === 'overdue').length;
 
   return (
     <SafeAreaView style={styles.container} edges={['top']}>
@@ -72,12 +86,13 @@ export default function InvoicesListScreen({ navigation }) {
 
       <FlatList
         data={invoices}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={({ item }) => (
           <>
             <InvoiceItem
               invoice={item}
-              onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: item.id })}
+              patient={patientMap[item.patientId]}
+              onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: item._id })}
             />
             <Divider type="inset" />
           </>

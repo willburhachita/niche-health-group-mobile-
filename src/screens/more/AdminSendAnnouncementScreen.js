@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, TextInput, StyleSheet, Modal, FlatList, ActivityIndicator } from 'react-native';
+import { View, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform, StyleSheet, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
@@ -228,6 +228,7 @@ export default function AdminSendAnnouncementScreen({ navigation }) {
             <View style={{ width: 60 }} />
           </View>
 
+          <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
             {/* Title */}
             <View style={styles.inputGroup}>
@@ -308,6 +309,7 @@ export default function AdminSendAnnouncementScreen({ navigation }) {
               <Button label={isSending ? 'Sending...' : 'Send Announcement'} onPress={handleSend} disabled={!isValid || isSending} />
             </View>
           </ScrollView>
+          </KeyboardAvoidingView>
         </SafeAreaView>
       </Modal>
     </SafeAreaView>

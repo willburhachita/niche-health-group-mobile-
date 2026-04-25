@@ -1,0 +1,6 @@
+.agents/
+docs/
+.git/
+node_modules/
+android/
+ios/

@@ -7,8 +7,6 @@ import { radius } from '../../constants/radius';
 import { shadows } from '../../constants/shadows';
 import { AppText } from '../common/AppText';
 import { Avatar } from '../common/Avatar';
-import { APPOINTMENT_STATUSES } from '../../data/mockAppointments';
-import { getPatientById } from '../../data/mockPatients';
 import { formatTime } from '../../utils/dateHelpers';
 
 const statusColors = {
@@ -20,10 +18,18 @@ const statusColors = {
   open: colors.navyBlue,
 };
 
-export const AppointmentCard = ({ appointment, onPress, compact = false }) => {
-  const patient = appointment.patientId ? getPatientById(appointment.patientId) : null;
-  const statusInfo = APPOINTMENT_STATUSES[appointment.status] || {};
+const STATUS_LABELS = {
+  confirmed: 'Confirmed',
+  pending: 'Pending',
+  cancelled: 'Cancelled',
+  completed: 'Completed',
+  noShow: 'No Show',
+  open: 'Open',
+};
+
+export const AppointmentCard = ({ appointment, patient, onPress, compact = false }) => {
   const dotColor = statusColors[appointment.status] || colors.mediumGrey;
+  const statusLabel = STATUS_LABELS[appointment.status] || appointment.status;
   const timeStr = formatTime(appointment.startTime);
 
   if (compact) {
@@ -85,7 +91,7 @@ export const AppointmentCard = ({ appointment, onPress, compact = false }) => {
       </View>
       <View style={styles.statusBadge}>
         <View style={[styles.statusDotSmall, { backgroundColor: dotColor }]} />
-        <AppText variant="small" color={dotColor}>{statusInfo.label}</AppText>
+        <AppText variant="small" color={dotColor}>{statusLabel}</AppText>
       </View>
     </Pressable>
   );

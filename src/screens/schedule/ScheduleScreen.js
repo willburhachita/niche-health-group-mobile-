@@ -1,13 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { View, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
 import { AppText } from '../../components/common/AppText';
 import { Card } from '../../components/common/Card';
-import { mockSchedule } from '../../data/mockSchedule';
 import { formatTime, formatDateShort } from '../../utils/dateHelpers';
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -16,9 +17,12 @@ export default function ScheduleScreen({ navigation }) {
   const today = new Date();
   const [selectedDate, setSelectedDate] = useState(today);
 
+  const year = today.getFullYear();
+  const month = today.getMonth();
+
+  const monthEvents = useQuery(api.scheduleEvents.listByMonth, { year, month }) ?? [];
+
   const getDatesForMonth = () => {
-    const year = today.getFullYear();
-    const month = today.getMonth();
     const firstDay = new Date(year, month, 1).getDay();
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const dates = [];
@@ -34,7 +38,7 @@ export default function ScheduleScreen({ navigation }) {
     if (!date) return [];
     const dayStart = new Date(date); dayStart.setHours(0, 0, 0, 0);
     const dayEnd = new Date(date); dayEnd.setHours(23, 59, 59, 999);
-    return mockSchedule.filter(e => e.startTime >= dayStart.getTime() && e.startTime <= dayEnd.getTime());
+    return monthEvents.filter(e => e.startTime >= dayStart.getTime() && e.startTime <= dayEnd.getTime());
   };
 
   const selectedEvents = getEventsForDay(selectedDate);
@@ -84,7 +88,7 @@ export default function ScheduleScreen({ navigation }) {
           {selectedEvents.length === 0 ? (
             <AppText variant="body" color={colors.mediumGrey} style={{ paddingHorizontal: spacing.base }}>No events</AppText>
           ) : selectedEvents.map(e => (
-            <Card key={e.id} onPress={() => navigation.navigate('EventDetail', { eventId: e.id })} style={{ marginHorizontal: spacing.base }}>
+            <Card key={e._id} onPress={() => navigation.navigate('EventDetail', { eventId: e._id })} style={{ marginHorizontal: spacing.base }}>
               <View style={styles.eventRow}>
                 <View style={[styles.eventBar, { backgroundColor: e.type === 'training' ? colors.peach : e.type === 'meeting' ? colors.success : colors.navyBlue }]} />
                 <View style={{ flex: 1 }}>

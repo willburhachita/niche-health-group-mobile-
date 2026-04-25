@@ -4,9 +4,11 @@ import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { AppText } from '../common/AppText';
-import { getPatientById } from '../../data/mockPatients';
-import { formatCurrency } from '../../data/mockInvoices';
 import { formatTimestamp } from '../../utils/dateHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
 
 const statusStyles = {
   paid: { color: colors.success, bg: colors.success + '18', label: 'Paid' },
@@ -14,8 +16,7 @@ const statusStyles = {
   overdue: { color: colors.error, bg: colors.error + '18', label: 'Overdue' },
 };
 
-export const InvoiceItem = ({ invoice, onPress }) => {
-  const patient = getPatientById(invoice.patientId);
+export const InvoiceItem = ({ invoice, patient, onPress }) => {
   const status = statusStyles[invoice.status] || statusStyles.unpaid;
 
   return (

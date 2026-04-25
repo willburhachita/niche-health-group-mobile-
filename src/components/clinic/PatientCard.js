@@ -29,7 +29,7 @@ export const PatientCard = ({ patient, onPress, showLastVisit = true }) => {
           <AppText variant="bodyBold" numberOfLines={1} style={styles.name}>{patient.displayName}</AppText>
           <Badge label={statusInfo.label} variant={statusInfo.variant} />
         </View>
-        <AppText variant="caption" color={colors.darkGrey}>{patient.patientId}</AppText>
+        <AppText variant="caption" color={colors.darkGrey}>{patient.patientCode || patient.patientId}</AppText>
         {showLastVisit && patient.lastVisit && (
           <AppText variant="small" color={colors.mediumGrey}>
             Last visit: {formatTimestamp(patient.lastVisit)}

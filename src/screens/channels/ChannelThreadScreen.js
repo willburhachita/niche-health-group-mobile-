@@ -11,8 +11,10 @@ import { ChatBubble } from '../../components/chat/ChatBubble';
 import { ChatInput } from '../../components/chat/ChatInput';
 import { DateSeparator } from '../../components/chat/DateSeparator';
 import { TypingIndicator } from '../../components/chat/TypingIndicator';
+import { FloatingChatButtons } from '../../components/chat/FloatingChatButtons';
 import { formatDate } from '../../utils/dateHelpers';
 import { useQuery, useMutation } from 'convex/react';
+import { ActivityIndicator } from 'react-native';
 import { api } from '../../../convex/_generated/api';
 import { useAuth } from '../../hooks/useAuth';
 
@@ -28,8 +30,17 @@ export default function ChannelThreadScreen({ navigation, route }) {
   const { currentAccount } = useAuth();
   const currentUserId = currentAccount?.userId;
 
+  const deleteMessage = useMutation(api.messages.deleteMessage);
+  const editMessage = useMutation(api.messages.editMessage);
+
   const [isTyping, setIsTyping] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isAtBottom, setIsAtBottom] = useState(true);
+  const [mentionIndex, setMentionIndex] = useState(0);
+  const [selectedMessage, setSelectedMessage] = useState(null);
+  const [editingMessage, setEditingMessage] = useState(null);
+  const mountTimeRef = useRef(Date.now());
+  const hasScrolledOnOpen = useRef(false);
   const flatListRef = useRef(null);
   const insets = useSafeAreaInsets();
 
@@ -69,9 +80,48 @@ export default function ChannelThreadScreen({ navigation, route }) {
       .filter(Boolean);
   }, [channel?.members, currentUserId, userMap]);
 
+  // Unread mentions: messages mentioning current user before screen opened
+  const unreadMentions = React.useMemo(() => {
+    if (!messages?.length || !currentUserId) return [];
+    const mt = mountTimeRef.current;
+    return messages
+      .map((m, i) => ({ ...m, _index: i }))
+      .filter(m => m.mentions?.includes(currentUserId) && m.sentAt <= mt);
+  }, [messages, currentUserId]);
+
+  const remainingMentions = Math.max(0, unreadMentions.length - mentionIndex);
+
+  // Safety: stop auto-scrolling after 5s (images etc may still be loading)
+  useEffect(() => {
+    const t = setTimeout(() => { hasScrolledOnOpen.current = true; }, 5000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // Called on every onContentSizeChange — receives (contentWidth, contentHeight)
+  const doInitialScroll = useCallback((contentWidth, contentHeight) => {
+    if (hasScrolledOnOpen.current) return;
+    if (!messages?.length) return;
+
+    const mt = mountTimeRef.current ?? Date.now();
+
+    // Priority 1: first unread @mention (scroll once, then done)
+    const firstMentionIdx = messages.findIndex(
+      m => m.mentions?.includes(currentUserId) && m.sentAt <= mt
+    );
+    if (firstMentionIdx >= 0) {
+      console.log(`[SCROLL-CH] → scrollToIndex(${firstMentionIdx}) for @mention`);
+      hasScrolledOnOpen.current = true;
+      flatListRef.current?.scrollToIndex({ index: firstMentionIdx, animated: false, viewPosition: 0.3 });
+      return;
+    }
+
+    // Priority 2: pin to bottom using exact content height
+    console.log(`[SCROLL-CH] → scrollToOffset(${Math.round(contentHeight)}) msgs=${messages.length}`);
+    flatListRef.current?.scrollToOffset({ offset: contentHeight, animated: false });
+  }, [messages, currentUserId]);
+
   useEffect(() => {
     if (channelId) markRead({ channelId });
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 200);
   }, []);  // mount only
 
   useEffect(() => {
@@ -79,7 +129,7 @@ export default function ChannelThreadScreen({ navigation, route }) {
     if (lastMsg?.senderId !== currentUserId && channelId && currentUserId) {
       markRead({ channelId });
     }
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
+    if (isAtBottom) setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 50);
   }, [messages.length]);
 
   const handleSend = useCallback(async (text, mentions) => {
@@ -121,6 +171,93 @@ export default function ChannelThreadScreen({ navigation, route }) {
     }
   }, [channelId, currentUserId, generateUploadUrl, sendMessage, markRead]);
 
+  const handleSendFile = useCallback(async (localUri, fileName, mimeType, type) => {
+    if (!channelId || !currentUserId) return;
+    try {
+      const uploadUrl = await generateUploadUrl();
+      const response = await fetch(localUri);
+      const blob = await response.blob();
+      const uploadRes = await fetch(uploadUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': mimeType },
+        body: blob,
+      });
+      const { storageId } = await uploadRes.json();
+      await sendMessage({
+        channelId,
+        senderId: currentUserId,
+        content: type === 'image' ? '📷 Photo' : `📎 ${fileName}`,
+        type,
+        fileUrl: storageId,
+        fileName,
+      });
+      if (channelId) markRead({ channelId });
+    } catch (e) {
+      console.error('[File] channel upload error:', e);
+    }
+  }, [channelId, currentUserId, generateUploadUrl, sendMessage, markRead]);
+
+  const handleSendLocation = useCallback(async (lat, lng) => {
+    if (!channelId || !currentUserId) return;
+    await sendMessage({
+      channelId,
+      senderId: currentUserId,
+      content: `${lat},${lng}`,
+      type: 'location',
+    });
+    if (channelId) markRead({ channelId });
+  }, [channelId, currentUserId, sendMessage, markRead]);
+
+  const handleMentionPress = useCallback(() => {
+    if (mentionIndex < unreadMentions.length) {
+      const target = unreadMentions[mentionIndex];
+      flatListRef.current?.scrollToIndex({ index: target._index, animated: true, viewPosition: 0.3 });
+      setMentionIndex(prev => prev + 1);
+    }
+  }, [mentionIndex, unreadMentions]);
+
+  const handleScrollToBottom = useCallback(() => {
+    flatListRef.current?.scrollToEnd({ animated: true });
+  }, []);
+
+  const handleLongPress = useCallback((msg) => {
+    Keyboard.dismiss();
+    setSelectedMessage(msg);
+  }, []);
+
+  const handleDeleteForMe = useCallback(async () => {
+    if (!selectedMessage) return;
+    await deleteMessage({ messageId: selectedMessage._id, userId: currentUserId, forEveryone: false });
+    setSelectedMessage(null);
+  }, [selectedMessage, currentUserId, deleteMessage]);
+
+  const handleUnsend = useCallback(async () => {
+    if (!selectedMessage) return;
+    await deleteMessage({ messageId: selectedMessage._id, userId: currentUserId, forEveryone: true });
+    setSelectedMessage(null);
+  }, [selectedMessage, currentUserId, deleteMessage]);
+
+  const handleEdit = useCallback(() => {
+    if (!selectedMessage) return;
+    setEditingMessage(selectedMessage);
+    setSelectedMessage(null);
+  }, [selectedMessage]);
+
+  const handleSendEdit = useCallback(async (newText) => {
+    if (!editingMessage) return;
+    await editMessage({ messageId: editingMessage._id, userId: currentUserId, newContent: newText });
+    setEditingMessage(null);
+  }, [editingMessage, currentUserId, editMessage]);
+
+  const handleScroll = useCallback((e) => {
+    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    const distanceFromBottom = contentSize.height - contentOffset.y - layoutMeasurement.height;
+    if (distanceFromBottom > 250) {
+      setIsAtBottom(false);
+      hasScrolledOnOpen.current = true;
+    }
+  }, []);
+
   const renderMessage = ({ item, index }) => {
     const isOwn = item.senderId === currentUserId;
     const prev = messages[index - 1];
@@ -137,6 +274,7 @@ export default function ChannelThreadScreen({ navigation, route }) {
           senderName={sender?.displayName}
           currentUserId={currentUserId}
           userMap={userMap}
+          onLongPress={() => handleLongPress(item)}
         />
       </View>
     );
@@ -151,19 +289,48 @@ export default function ChannelThreadScreen({ navigation, route }) {
       style={[styles.container, { paddingTop: insets.top }]}
       behavior={Platform.OS === 'ios' ? 'padding' : (keyboardHeight > 0 ? 'height' : undefined)}
     >
-      {/* Header */}
+      {/* Header — swaps to action bar on long-press */}
       <View style={styles.header}>
-        <Pressable onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ChannelsList')} hitSlop={12}>
-          <Feather name="chevron-left" size={24} color={colors.black} />
-        </Pressable>
-        <View style={styles.headerCenter}>
-          <Feather name={channel?.type === 'private' ? 'lock' : 'hash'} size={18} color={colors.navyBlue} />
-          <AppText variant="h3" style={{ marginLeft: spacing.xs }}>{channel?.displayName}</AppText>
-          <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: spacing.sm }}>{channel?.memberCount}</AppText>
-        </View>
-        <Pressable onPress={() => navigation.navigate('ChannelInfo', { channelId })} hitSlop={12}>
-          <Feather name="info" size={20} color={colors.navyBlue} />
-        </Pressable>
+        {selectedMessage ? (
+          <>
+            <Pressable style={styles.actionBtn} onPress={() => setSelectedMessage(null)} hitSlop={10}>
+              <Feather name="x" size={22} color={colors.black} />
+              <AppText variant="small" color={colors.darkGrey} style={styles.actionLabel}>Cancel</AppText>
+            </Pressable>
+            <View style={styles.actionGroup}>
+              {selectedMessage.senderId === currentUserId && selectedMessage.type === 'text' && (
+                <Pressable style={styles.actionBtn} onPress={handleEdit} hitSlop={10}>
+                  <Feather name="edit-2" size={20} color={colors.navyBlue} />
+                  <AppText variant="small" color={colors.navyBlue} style={styles.actionLabel}>Edit</AppText>
+                </Pressable>
+              )}
+              <Pressable style={styles.actionBtn} onPress={handleDeleteForMe} hitSlop={10}>
+                <Feather name="trash" size={20} color={colors.warning} />
+                <AppText variant="small" color={colors.warning} style={styles.actionLabel}>Delete</AppText>
+              </Pressable>
+              {selectedMessage.senderId === currentUserId && (
+                <Pressable style={styles.actionBtn} onPress={handleUnsend} hitSlop={10}>
+                  <Feather name="trash-2" size={20} color={colors.error} />
+                  <AppText variant="small" color={colors.error} style={styles.actionLabel}>Unsend</AppText>
+                </Pressable>
+              )}
+            </View>
+          </>
+        ) : (
+          <>
+            <Pressable onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('ChannelsList')} hitSlop={12}>
+              <Feather name="chevron-left" size={24} color={colors.black} />
+            </Pressable>
+            <Pressable style={styles.headerCenter} onPress={() => navigation.navigate('ChannelInfo', { channelId })}>
+              <Feather name={channel?.type === 'private' ? 'lock' : 'hash'} size={18} color={colors.navyBlue} />
+              <AppText variant="h3" style={{ marginLeft: spacing.xs }}>{channel?.displayName}</AppText>
+              <AppText variant="small" color={colors.mediumGrey} style={{ marginLeft: spacing.sm }}>{channel?.memberCount} members</AppText>
+            </Pressable>
+            <Pressable onPress={() => navigation.navigate('ChannelInfo', { channelId })} hitSlop={12}>
+              <Feather name="info" size={20} color={colors.navyBlue} />
+            </Pressable>
+          </>
+        )}
       </View>
 
       {channel?.description && (
@@ -173,23 +340,72 @@ export default function ChannelThreadScreen({ navigation, route }) {
       )}
 
       {/* Messages */}
-      <FlatList
-        ref={flatListRef}
-        data={messages}
-        keyExtractor={item => item._id}
-        renderItem={renderMessage}
-        contentContainerStyle={styles.messageList}
-        onContentSizeChange={() => {
-          if (messages.length > 0) flatListRef.current?.scrollToEnd({ animated: false });
-        }}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="interactive"
-        ListFooterComponent={isTyping ? <TypingIndicator name={typingUserName} /> : null}
-      />
+      <View style={{ flex: 1 }}>
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={item => item._id}
+          renderItem={renderMessage}
+          contentContainerStyle={styles.messageList}
+          initialNumToRender={messages?.length || 50}
+          maxToRenderPerBatch={50}
+          onScroll={handleScroll}
+          scrollEventThrottle={100}
+          onEndReached={() => setIsAtBottom(true)}
+          onEndReachedThreshold={0.15}
+          onContentSizeChange={doInitialScroll}
+          onScrollToIndexFailed={(info) => {
+            flatListRef.current?.scrollToOffset({ offset: info.averageItemLength * info.index, animated: false });
+          }}
+          keyboardShouldPersistTaps="handled"
+          keyboardDismissMode="interactive"
+          ListFooterComponent={isTyping ? <TypingIndicator name={typingUserName} /> : null}
+        />
+        <FloatingChatButtons
+          unreadMentionCount={remainingMentions}
+          onMentionPress={handleMentionPress}
+          showScrollToBottom={!isAtBottom}
+          onScrollToBottom={handleScrollToBottom}
+        />
+        {selectedMessage && (
+          <Pressable style={styles.overlay} onPress={() => setSelectedMessage(null)}>
+            <View style={[
+              styles.floatingBubble,
+              selectedMessage.senderId === currentUserId ? styles.floatingOwn : styles.floatingOther,
+            ]}>
+              <ChatBubble
+                message={selectedMessage}
+                isOwn={selectedMessage.senderId === currentUserId}
+                showSender={false}
+                currentUserId={currentUserId}
+                userMap={userMap}
+              />
+            </View>
+          </Pressable>
+        )}
+      </View>
 
-      {/* Input */}
+      {/* Input / Edit mode */}
       <View style={[styles.inputWrapper, { paddingBottom: keyboardHeight > 0 ? 0 : insets.bottom }]}>
-        <ChatInput onSend={handleSend} onSendVoice={handleSendVoice} mentionTargets={mentionTargets} />
+        {editingMessage ? (
+          <View style={styles.editBanner}>
+            <Feather name="edit-2" size={14} color={colors.navyBlue} />
+            <AppText variant="small" color={colors.navyBlue} style={{ flex: 1, marginLeft: spacing.xs }}>Editing message</AppText>
+            <Pressable onPress={() => setEditingMessage(null)} hitSlop={8}>
+              <Feather name="x" size={16} color={colors.mediumGrey} />
+            </Pressable>
+          </View>
+        ) : null}
+        <ChatInput
+          key={editingMessage?._id || 'normal'}
+          initialText={editingMessage?.content}
+          onSend={editingMessage ? handleSendEdit : handleSend}
+          onSendVoice={editingMessage ? undefined : handleSendVoice}
+          onSendFile={editingMessage ? undefined : handleSendFile}
+          onSendLocation={editingMessage ? undefined : handleSendLocation}
+          mentionTargets={mentionTargets}
+          placeholder={editingMessage ? 'Edit message...' : 'Type a message...'}
+        />
       </View>
     </KeyboardAvoidingView>
   );
@@ -202,10 +418,30 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1, borderBottomColor: colors.lightGrey,
   },
   headerCenter: { flex: 1, flexDirection: 'row', alignItems: 'center', marginLeft: spacing.md },
+  actionGroup: { flexDirection: 'row', alignItems: 'center', gap: spacing.xl },
+  actionBtn: { alignItems: 'center', gap: 3 },
+  actionLabel: { fontSize: 10 },
   topicBar: { 
     paddingHorizontal: spacing.base, paddingVertical: spacing.sm, 
     backgroundColor: colors.surface, borderBottomWidth: 1, borderBottomColor: colors.lightGrey 
   },
-  messageList: { paddingVertical: spacing.md, flexGrow: 1 },
+  messageList: { paddingTop: spacing.md, paddingBottom: 20, flexGrow: 1 },
   inputWrapper: { backgroundColor: colors.white },
+  editBanner: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: spacing.base, paddingVertical: spacing.xs, backgroundColor: colors.navyLight, gap: spacing.xs },
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    justifyContent: 'center',
+    zIndex: 20,
+  },
+  floatingBubble: {
+    maxWidth: '80%',
+    shadowColor: '#000',
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 12,
+  },
+  floatingOwn: { alignSelf: 'flex-end', marginRight: spacing.base },
+  floatingOther: { alignSelf: 'flex-start', marginLeft: spacing.base },
 });

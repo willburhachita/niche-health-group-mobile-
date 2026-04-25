@@ -2,6 +2,9 @@ import React, { useState, useRef } from 'react';
 import { Audio } from 'expo-av';
 import { View, TextInput, Pressable, StyleSheet, Animated, Easing } from 'react-native';
 import { Feather } from '@expo/vector-icons';
+import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker';
+import * as Location from 'expo-location';
 import { colors } from '../../constants/colors';
 import { typography } from '../../constants/typography';
 import { spacing } from '../../constants/spacing';
@@ -11,10 +14,10 @@ import { Avatar } from '../common/Avatar';
 import { useAlert } from '../common/CustomAlert';
 
 const ATTACHMENT_OPTIONS = [
-  { icon: 'image', label: 'Photo', color: colors.navyBlue },
-  { icon: 'file', label: 'Document', color: colors.peach },
-  { icon: 'camera', label: 'Camera', color: colors.success },
-  { icon: 'map-pin', label: 'Location', color: colors.warning },
+  { key: 'photo', icon: 'image', label: 'Photo', color: colors.navyBlue },
+  { key: 'document', icon: 'file', label: 'Document', color: colors.peach },
+  { key: 'camera', icon: 'camera', label: 'Camera', color: colors.success },
+  { key: 'location', icon: 'map-pin', label: 'Location', color: colors.warning },
 ];
 
 /**
@@ -35,8 +38,8 @@ const fmtDuration = (sec) => {
   return `${m}:${s.toString().padStart(2, '0')}`;
 };
 
-export const ChatInput = ({ onSend, onSendVoice, placeholder = 'Type a message...', mentionTargets = [] }) => {
-  const [text, setText] = useState('');
+export const ChatInput = ({ onSend, onSendVoice, onSendFile, onSendLocation, placeholder = 'Type a message...', mentionTargets = [], initialText }) => {
+  const [text, setText] = useState(initialText || '');
   const [selection, setSelection] = useState({ start: 0, end: 0 });
   const [attachOpen, setAttachOpen] = useState(false);
   const [mentionQuery, setMentionQuery] = useState(null);
@@ -108,13 +111,73 @@ export const ChatInput = ({ onSend, onSendVoice, placeholder = 'Type a message..
       })
     : [];
 
-  const handleAttachmentOption = (opt) => {
+  const pickPhoto = async () => {
     setAttachOpen(false);
-    alert({
-      type: 'info',
-      title: `${opt.label} attachment`,
-      message: `${opt.label} upload is coming soon. File attachments will be stored via Convex storage.`,
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      alert({ type: 'error', title: 'Permission denied', message: 'Please allow access to your photo library.' });
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      quality: 0.8,
     });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      const name = asset.fileName || `photo_${Date.now()}.jpg`;
+      onSendFile && onSendFile(asset.uri, name, asset.mimeType || 'image/jpeg', 'image');
+    }
+  };
+
+  const takePhoto = async () => {
+    setAttachOpen(false);
+    const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (status !== 'granted') {
+      alert({ type: 'error', title: 'Permission denied', message: 'Please allow access to your camera.' });
+      return;
+    }
+    const result = await ImagePicker.launchCameraAsync({
+      quality: 0.8,
+    });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      const name = asset.fileName || `camera_${Date.now()}.jpg`;
+      onSendFile && onSendFile(asset.uri, name, asset.mimeType || 'image/jpeg', 'image');
+    }
+  };
+
+  const pickDocument = async () => {
+    setAttachOpen(false);
+    const result = await DocumentPicker.getDocumentAsync({ copyToCacheDirectory: true });
+    if (!result.canceled && result.assets?.[0]) {
+      const asset = result.assets[0];
+      onSendFile && onSendFile(asset.uri, asset.name, asset.mimeType || 'application/octet-stream', 'file');
+    }
+  };
+
+  const shareLocation = async () => {
+    setAttachOpen(false);
+    const { status } = await Location.requestForegroundPermissionsAsync();
+    if (status !== 'granted') {
+      alert({ type: 'error', title: 'Permission denied', message: 'Please allow location access to share your location.' });
+      return;
+    }
+    try {
+      const loc = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+      onSendLocation && onSendLocation(loc.coords.latitude, loc.coords.longitude);
+    } catch (e) {
+      console.error('[Location] error:', e);
+      alert({ type: 'error', title: 'Location error', message: 'Could not get your current location. Please try again.' });
+    }
+  };
+
+  const handleAttachmentOption = (opt) => {
+    switch (opt.key) {
+      case 'photo': return pickPhoto();
+      case 'camera': return takePhoto();
+      case 'document': return pickDocument();
+      case 'location': return shareLocation();
+    }
   };
 
   const startRecording = async () => {

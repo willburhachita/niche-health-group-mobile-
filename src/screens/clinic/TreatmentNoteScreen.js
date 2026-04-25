@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, TextInput, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, TextInput, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -11,14 +11,22 @@ import { Avatar } from '../../components/common/Avatar';
 import { Button } from '../../components/common/Button';
 import { Divider } from '../../components/common/Divider';
 import { VitalsInput } from '../../components/clinic/VitalsInput';
-import { getPatientById } from '../../data/mockPatients';
-import { getTreatmentNoteById, TREATMENT_TEMPLATES } from '../../data/mockTreatmentNotes';
+import { useQuery, useMutation } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
+import { useAuth } from '../../hooks/useAuth';
+import { useAlert } from '../../components/common/CustomAlert';
 import { formatDate, formatTime } from '../../utils/dateHelpers';
+
+const TREATMENT_TEMPLATES = ['General Consultation', 'Follow-up', 'Emergency', 'Procedure', 'Mental Health', 'Paediatric'];
 
 export default function TreatmentNoteScreen({ route, navigation }) {
   const { patientId, noteId } = route.params || {};
-  const existingNote = noteId ? getTreatmentNoteById(noteId) : null;
-  const patient = getPatientById(patientId || existingNote?.patientId);
+  const alert = useAlert();
+  const { currentAccount } = useAuth();
+  const existingNote = useQuery(api.treatmentNotes.get, noteId ? { id: noteId } : 'skip');
+  const resolvedPatientId = patientId || existingNote?.patientId;
+  const patient = useQuery(api.patients.get, resolvedPatientId ? { id: resolvedPatientId } : 'skip');
+  const createNote = useMutation(api.treatmentNotes.create);
   const isReadOnly = !!existingNote;
 
   const [template, setTemplate] = useState(existingNote?.template || '');
@@ -29,8 +37,32 @@ export default function TreatmentNoteScreen({ route, navigation }) {
   const [vitals, setVitals] = useState(existingNote?.vitals || {});
   const [showVitals, setShowVitals] = useState(!!existingNote?.vitals?.bp);
 
-  const handleSave = () => {
-    navigation.goBack();
+  const handleSave = async () => {
+    if (!resolvedPatientId) {
+      alert({ type: 'warning', title: 'Error', message: 'No patient selected.' });
+      return;
+    }
+    try {
+      await createNote({
+        patientId: resolvedPatientId,
+        providerId: currentAccount?.userId || 'unknown',
+        template: template || 'General Consultation',
+        subjective: subjective || undefined,
+        objective: objective || undefined,
+        assessment: assessment || undefined,
+        plan: plan || undefined,
+        vitals: showVitals ? vitals : undefined,
+        isPrivate: false,
+      });
+      alert({
+        type: 'success',
+        title: 'Note Saved',
+        message: 'Treatment note has been saved.',
+        buttons: [{ label: 'OK', onPress: () => navigation.goBack() }],
+      });
+    } catch (e) {
+      alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to save note.' });
+    }
   };
 
   return (
@@ -49,6 +81,7 @@ export default function TreatmentNoteScreen({ route, navigation }) {
         )}
       </View>
 
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
         {/* Patient Banner */}
         {patient && (
@@ -56,7 +89,7 @@ export default function TreatmentNoteScreen({ route, navigation }) {
             <Avatar name={patient.displayName} size={36} />
             <View style={{ marginLeft: spacing.sm, flex: 1 }}>
               <AppText variant="bodyBold">{patient.displayName}</AppText>
-              <AppText variant="small" color={colors.mediumGrey}>{patient.patientId}</AppText>
+              <AppText variant="small" color={colors.mediumGrey}>{patient.patientCode}</AppText>
             </View>
             {existingNote && (
               <AppText variant="small" color={colors.mediumGrey}>
@@ -151,6 +184,7 @@ export default function TreatmentNoteScreen({ route, navigation }) {
         )}
         <View style={{ height: spacing.xxxl }} />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

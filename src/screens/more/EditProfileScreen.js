@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, KeyboardAvoidingView, Platform, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
@@ -32,6 +32,7 @@ export default function EditProfileScreen({ navigation }) {
           <AppText variant="bodyBold" color={colors.navyBlue}>Save</AppText>
         </Pressable>
       </View>
+      <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
       <ScrollView contentContainerStyle={styles.content}>
         <Pressable style={styles.avatarSection}>
           <Avatar name={displayName} size={80} />
@@ -45,6 +46,7 @@ export default function EditProfileScreen({ navigation }) {
         <Input label="Phone" value={currentAccount?.phone || mockUser.phone} editable={false} icon="phone" />
         <Input label="Department" value={mockUser.department} editable={false} icon="briefcase" />
       </ScrollView>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }

@@ -1,7 +1,9 @@
-import React, { useState } from 'react';
-import { View, FlatList, Pressable, StyleSheet } from 'react-native';
+import React, { useState, useMemo } from 'react';
+import { View, FlatList, Pressable, ActivityIndicator, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 import { colors } from '../../constants/colors';
 import { spacing, TAB_BAR_HEIGHT } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
@@ -9,39 +11,65 @@ import { shadows } from '../../constants/shadows';
 import { AppText } from '../../components/common/AppText';
 import { SearchBar } from '../../components/common/SearchBar';
 import { Card } from '../../components/common/Card';
-import { mockPayments, getPaymentsSummary, getMethodLabel, getMethodIcon } from '../../data/mockPayments';
-import { getPatientById } from '../../data/mockPatients';
-import { formatCurrency } from '../../data/mockInvoices';
 import { formatTimestamp } from '../../utils/dateHelpers';
+import { exportPaymentsCSV } from '../../utils/documentHelpers';
+
+function formatCurrency(amount) {
+  return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+}
+
+const METHOD_META = {
+  cash: { label: 'Cash', icon: 'dollar-sign' },
+  mobile_money: { label: 'Mobile Money', icon: 'smartphone' },
+  card: { label: 'Card', icon: 'credit-card' },
+  nhima: { label: 'NHIMA', icon: 'shield' },
+  bank_transfer: { label: 'Bank Transfer', icon: 'briefcase' },
+  cheque: { label: 'Cheque', icon: 'file-text' },
+};
+function getMethodLabel(m) { return METHOD_META[m]?.label || m; }
+function getMethodIcon(m) { return METHOD_META[m]?.icon || 'dollar-sign'; }
 
 const FILTERS = ['All', 'Completed', 'Pending'];
 
 export default function PaymentsListScreen({ navigation }) {
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
-  const summary = getPaymentsSummary();
+  const [exporting, setExporting] = useState(false);
 
-  const getFiltered = () => {
-    let items = mockPayments;
+  const handleExport = async () => {
+    setExporting(true);
+    await exportPaymentsCSV(payments, patientMap);
+    setExporting(false);
+  };
+  const allPayments = useQuery(api.paymentsClinic.list) ?? [];
+  const summary = useQuery(api.paymentsClinic.summary) ?? { totalReceived: 0, totalPending: 0, completedCount: 0, pendingCount: 0 };
+  const patients = useQuery(api.patients.list, {}) ?? [];
+
+  const patientMap = useMemo(() => {
+    const m = {};
+    patients.forEach(p => { m[p._id] = p; });
+    return m;
+  }, [patients]);
+
+  const payments = useMemo(() => {
+    let items = [...allPayments];
     if (filter === 'Completed') items = items.filter(p => p.status === 'completed');
     if (filter === 'Pending') items = items.filter(p => p.status === 'pending');
     if (search.length > 0) {
       const q = search.toLowerCase();
       items = items.filter(p => {
-        const patient = getPatientById(p.patientId);
-        return patient?.displayName.toLowerCase().includes(q) || p.invoiceId.toLowerCase().includes(q) || p.referenceNumber?.toLowerCase().includes(q);
+        const patient = patientMap[p.patientId];
+        return patient?.displayName?.toLowerCase().includes(q) || p.referenceNumber?.toLowerCase().includes(q);
       });
     }
     return items.sort((a, b) => b.paymentDate - a.paymentDate);
-  };
-
-  const payments = getFiltered();
+  }, [allPayments, filter, search, patientMap]);
 
   const renderItem = ({ item }) => {
-    const patient = getPatientById(item.patientId);
+    const patient = patientMap[item.patientId];
     const isCompleted = item.status === 'completed';
     return (
-      <Pressable style={styles.payCard} onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: item.invoiceId })}>
+      <Pressable style={styles.payCard} onPress={() => item.invoiceId && navigation.navigate('InvoiceDetail', { invoiceId: item.invoiceId })}>
         <View style={[styles.methodIcon, { backgroundColor: isCompleted ? colors.success + '14' : colors.warning + '14' }]}>
           <Feather name={getMethodIcon(item.method)} size={16} color={isCompleted ? colors.success : colors.warning} />
         </View>
@@ -50,7 +78,7 @@ export default function PaymentsListScreen({ navigation }) {
             <AppText variant="bodyBold">{formatCurrency(item.amount)}</AppText>
             <View style={[styles.statusDot, { backgroundColor: isCompleted ? colors.success : colors.warning }]} />
           </View>
-          <AppText variant="caption" color={colors.darkGrey}>{patient?.displayName || 'Unknown'} · {item.invoiceId.toUpperCase()}</AppText>
+          <AppText variant="caption" color={colors.darkGrey}>{patient?.displayName || 'Unknown'}</AppText>
           <AppText variant="small" color={colors.mediumGrey}>{getMethodLabel(item.method)}{item.referenceNumber ? ` · ${item.referenceNumber}` : ''} · {formatTimestamp(item.paymentDate)}</AppText>
         </View>
       </Pressable>
@@ -64,7 +92,9 @@ export default function PaymentsListScreen({ navigation }) {
           <Feather name="chevron-left" size={24} color={colors.black} />
         </Pressable>
         <AppText variant="h2" style={styles.headerTitle}>Payments</AppText>
-        <View style={{ width: 24 }} />
+        <Pressable onPress={handleExport} hitSlop={8} disabled={exporting}>
+          {exporting ? <ActivityIndicator size="small" color={colors.navyBlue} /> : <Feather name="download" size={22} color={colors.navyBlue} />}
+        </Pressable>
       </View>
 
       {/* Summary */}
@@ -95,7 +125,7 @@ export default function PaymentsListScreen({ navigation }) {
 
       <FlatList
         data={payments}
-        keyExtractor={item => item.id}
+        keyExtractor={item => item._id}
         renderItem={renderItem}
         contentContainerStyle={{ paddingHorizontal: spacing.base, paddingBottom: TAB_BAR_HEIGHT }}
         ListEmptyComponent={<AppText variant="body" color={colors.mediumGrey} style={{ padding: spacing.xl, textAlign: 'center' }}>No payments found</AppText>}
