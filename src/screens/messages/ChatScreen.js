@@ -42,12 +42,14 @@ export default function ChatScreen({ navigation, route }) {
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'android') {
-        NavigationBar.setBackgroundColorAsync(colors.white);
-        NavigationBar.setButtonStyleAsync('dark');
+        try {
+          NavigationBar.setBackgroundColorAsync(colors.white);
+          NavigationBar.setButtonStyleAsync('dark');
+        } catch (_) {}
       }
       return () => {
         if (Platform.OS === 'android') {
-          NavigationBar.setBackgroundColorAsync('transparent');
+          try { NavigationBar.setBackgroundColorAsync('transparent'); } catch (_) {}
         }
       };
     }, [])
@@ -286,7 +288,7 @@ export default function ChatScreen({ navigation, route }) {
     const showDate = !prev || formatDate(item.sentAt) !== formatDate(prev.sentAt);
     const sender = userMap[item.senderId];
     const lastRead = initialReadAtRef.current ?? 0;
-    const showUnreadSep = lastRead > 0 && prev && prev.sentAt <= lastRead && item.sentAt > lastRead;
+    const showUnreadSep = lastRead > 0 && !isOwn && prev && prev.sentAt <= lastRead && item.sentAt > lastRead;
 
     return (
       <View>

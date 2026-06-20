@@ -72,6 +72,9 @@ export default function SupplierDetailScreen({ route, navigation }) {
           <DetailRow icon="phone" label="Phone" value={supplier.phone || 'Not set'} onPress={() => supplier.phone && Linking.openURL(`tel:${supplier.phone}`)} />
           <DetailRow icon="mail" label="Email" value={supplier.email || 'Not set'} onPress={() => supplier.email && Linking.openURL(`mailto:${supplier.email}`)} />
           <DetailRow icon="map-pin" label="Address" value={supplier.address || 'Not set'} />
+          {(supplier.city || supplier.region || supplier.country) && (
+            <DetailRow icon="globe" label="Location" value={[supplier.city, supplier.region, supplier.country].filter(Boolean).join(', ') || 'Not set'} />
+          )}
         </View>
 
         <Divider type="section" />

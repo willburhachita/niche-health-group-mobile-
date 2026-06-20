@@ -18,7 +18,7 @@ import { useAlert } from '../../components/common/CustomAlert';
 import {
   ROLES,
   generateStrongPassword,
-} from '../../data/mockAuth';
+} from '../../utils/authHelpers';
 
 const ROLE_OPTIONS = [
   { key: 'admin', icon: 'shield', color: colors.error },

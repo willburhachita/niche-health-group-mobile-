@@ -26,6 +26,21 @@ export default function StockHistoryScreen({ route, navigation }) {
 
   const renderItem = ({ item: adj }) => {
     const isIncrease = adj.adjustmentType === 'increase';
+    const source = adj.source || 'manual';
+    const sourceLabelMap = { manual: 'Manual', invoice: 'Invoice', void: 'Voided' };
+    const sourceBgMap = {
+      manual:  colors.navyBlue + '14',
+      invoice: '#FF8C00' + '18',
+      void:    colors.error + '14',
+    };
+    const sourceColorMap = {
+      manual:  colors.navyBlue,
+      invoice: '#B45309',
+      void:    colors.error,
+    };
+    const sourceLabel = sourceLabelMap[source] || 'Manual';
+    const sourceBg = sourceBgMap[source] || sourceBgMap.manual;
+    const sourceColor = sourceColorMap[source] || sourceColorMap.manual;
     return (
       <View style={styles.adjCard}>
         <View style={[styles.adjIcon, { backgroundColor: isIncrease ? colors.success + '14' : colors.error + '14' }]}>
@@ -34,10 +49,20 @@ export default function StockHistoryScreen({ route, navigation }) {
         <View style={{ flex: 1 }}>
           <View style={styles.adjTop}>
             <AppText variant="bodyBold">{isIncrease ? '+' : '-'}{adj.quantity}</AppText>
-            <AppText variant="caption" color={colors.darkGrey}>{adj.previousLevel} → {adj.newLevel}</AppText>
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+              <View style={[styles.sourceBadge, { backgroundColor: sourceBg }]}>
+                <AppText variant="small" color={sourceColor} style={{ fontWeight: '600' }}>{sourceLabel}</AppText>
+              </View>
+              <AppText variant="caption" color={colors.darkGrey}>{adj.previousLevel} → {adj.newLevel}</AppText>
+            </View>
           </View>
           <AppText variant="body" color={colors.darkGrey}>{adj.reason.replace(/_/g, ' ').replace(/^\w/, c => c.toUpperCase())}</AppText>
-          {adj.notes && <AppText variant="small" color={colors.mediumGrey} numberOfLines={2}>{adj.notes}</AppText>}
+          {adj.invoiceNumber && (
+            <AppText variant="small" color={colors.navyBlue} style={{ marginTop: 2 }}>
+              📄 {adj.invoiceNumber}
+            </AppText>
+          )}
+          {adj.notes && !adj.invoiceNumber && <AppText variant="small" color={colors.mediumGrey} numberOfLines={2}>{adj.notes}</AppText>}
           <AppText variant="small" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
             {adj.adjustedBy || 'Unknown'} · {formatTimestamp(adj.adjustedAt)}
           </AppText>
@@ -93,4 +118,5 @@ const styles = StyleSheet.create({
   adjCard: { flexDirection: 'row', padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.offWhite },
   adjIcon: { width: 32, height: 32, borderRadius: 16, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
   adjTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 2 },
+  sourceBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
 });

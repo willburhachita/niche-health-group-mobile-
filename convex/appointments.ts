@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
+import { enforcePermission } from "./utils/permissions";
 
 // ── List appointments for a date range ──────────────────────────────────
 export const listByDateRange = query({
@@ -103,49 +104,134 @@ export const create = mutation({
     location: v.optional(v.string()),
     status: v.string(),
     notes: v.optional(v.string()),
+    reasonForVisit: v.optional(v.string()),
     isRecurring: v.boolean(),
     recurringPattern: v.optional(v.string()),
     recurringEndDate: v.optional(v.number()),
+    recurringInterval: v.optional(v.number()),
+    recurringOccurrences: v.optional(v.number()),
+    recurringDays: v.optional(v.array(v.number())),
+    serviceTypeId: v.optional(v.id("serviceTypes")),
     createdBy: v.string(),
   },
   handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.createdBy, "createAppointment");
+    let parentStartTime = args.startTime;
+    let parentEndTime = args.endTime;
+
+    if (args.isRecurring && args.recurringPattern === "weekly" && args.recurringDays && args.recurringDays.length > 0) {
+      const daysSet = new Set(args.recurringDays);
+      let currentStart = new Date(args.startTime);
+      let currentEnd = new Date(args.endTime);
+      let found = false;
+      for (let i = 0; i < 7; i++) {
+        if (daysSet.has(currentStart.getDay())) {
+          found = true;
+          break;
+        }
+        currentStart.setDate(currentStart.getDate() + 1);
+        currentEnd.setDate(currentEnd.getDate() + 1);
+      }
+      if (found) {
+        parentStartTime = currentStart.getTime();
+        parentEndTime = currentEnd.getTime();
+      }
+    }
+
     const id = await ctx.db.insert("appointments", {
       ...args,
+      startTime: parentStartTime,
+      endTime: parentEndTime,
       parentAppointmentId: undefined,
       reminderSent: false,
       createdAt: Date.now(),
     });
 
     // If recurring, generate instances
-    if (args.isRecurring && args.recurringPattern && args.recurringEndDate) {
-      const patternMs = getPatternMs(args.recurringPattern);
-      if (patternMs > 0) {
-        let nextStart = args.startTime + patternMs;
-        let nextEnd = args.endTime + patternMs;
-        const batchLimit = 52; // max 1 year of weekly
+    if (args.isRecurring && args.recurringPattern) {
+      if (args.recurringPattern === "weekly" && args.recurringDays && args.recurringDays.length > 0) {
+        const daysSet = new Set(args.recurringDays);
+        let currentStart = new Date(parentStartTime);
+        let currentEnd = new Date(parentEndTime);
+        const limitOccurrences = args.recurringOccurrences ?? 100;
+        const batchLimit = Math.min(52, limitOccurrences - 1);
         let count = 0;
-        while (nextStart <= args.recurringEndDate && count < batchLimit) {
-          await ctx.db.insert("appointments", {
-            patientId: args.patientId,
-            providerId: args.providerId,
-            type: args.type,
-            startTime: nextStart,
-            endTime: nextEnd,
-            duration: args.duration,
-            location: args.location,
-            status: args.status,
-            notes: args.notes,
-            isRecurring: true,
-            recurringPattern: args.recurringPattern,
-            recurringEndDate: args.recurringEndDate,
-            parentAppointmentId: id,
-            reminderSent: false,
-            createdBy: args.createdBy,
-            createdAt: Date.now(),
-          });
-          nextStart += patternMs;
-          nextEnd += patternMs;
-          count++;
+        let daysCheck = 0;
+        while (count < batchLimit && daysCheck < 365) {
+          currentStart.setDate(currentStart.getDate() + 1);
+          currentEnd.setDate(currentEnd.getDate() + 1);
+          daysCheck++;
+          if (args.recurringEndDate && currentStart.getTime() > args.recurringEndDate) {
+            break;
+          }
+          const dayOfWeek = currentStart.getDay();
+          if (daysSet.has(dayOfWeek)) {
+            await ctx.db.insert("appointments", {
+              patientId: args.patientId,
+              providerId: args.providerId,
+              type: args.type,
+              serviceTypeId: args.serviceTypeId,
+              startTime: currentStart.getTime(),
+              endTime: currentEnd.getTime(),
+              duration: args.duration,
+              location: args.location,
+              status: args.status,
+              notes: args.notes,
+              reasonForVisit: args.reasonForVisit,
+              isRecurring: true,
+              recurringPattern: args.recurringPattern,
+              recurringEndDate: args.recurringEndDate,
+              recurringInterval: args.recurringInterval,
+              recurringOccurrences: args.recurringOccurrences,
+              recurringDays: args.recurringDays,
+              parentAppointmentId: id,
+              reminderSent: false,
+              createdBy: args.createdBy,
+              createdAt: Date.now(),
+            });
+            count++;
+          }
+        }
+      } else {
+        const basePatternMs = getPatternMs(args.recurringPattern);
+        const interval = args.recurringInterval ?? 1;
+        const patternMs = basePatternMs * interval;
+        if (patternMs > 0) {
+          let nextStart = args.startTime + patternMs;
+          let nextEnd = args.endTime + patternMs;
+          const limitOccurrences = args.recurringOccurrences ?? 100;
+          const batchLimit = Math.min(52, limitOccurrences - 1);
+          let count = 0;
+          while (count < batchLimit) {
+            if (args.recurringEndDate && nextStart > args.recurringEndDate) {
+              break;
+            }
+            await ctx.db.insert("appointments", {
+              patientId: args.patientId,
+              providerId: args.providerId,
+              type: args.type,
+              serviceTypeId: args.serviceTypeId,
+              startTime: nextStart,
+              endTime: nextEnd,
+              duration: args.duration,
+              location: args.location,
+              status: args.status,
+              notes: args.notes,
+              reasonForVisit: args.reasonForVisit,
+              isRecurring: true,
+              recurringPattern: args.recurringPattern,
+              recurringEndDate: args.recurringEndDate,
+              recurringInterval: args.recurringInterval,
+              recurringOccurrences: args.recurringOccurrences,
+              parentAppointmentId: id,
+              reminderSent: false,
+              createdBy: args.createdBy,
+              createdAt: Date.now(),
+            });
+            nextStart += patternMs;
+            nextEnd += patternMs;
+            count++;
+          }
         }
       }
     }
@@ -167,9 +253,13 @@ export const update = mutation({
     location: v.optional(v.string()),
     status: v.optional(v.string()),
     notes: v.optional(v.string()),
+    reasonForVisit: v.optional(v.string()),
+    recurringDays: v.optional(v.array(v.number())),
+    updatedBy: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { id, ...fields } = args;
+    await enforcePermission(ctx.db, args.updatedBy || "admin", "editAppointment");
+    const { id, updatedBy, ...fields } = args;
     const updates: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(fields)) {
       if (value !== undefined) updates[key] = value;
@@ -180,24 +270,78 @@ export const update = mutation({
 
 // ── Cancel appointment ──────────────────────────────────────────────────
 export const cancel = mutation({
-  args: { id: v.id("appointments") },
+  args: {
+    id: v.id("appointments"),
+    cancelReason: v.optional(v.string()),
+    cancelNotes: v.optional(v.string()),
+    cancelSeries: v.optional(v.boolean()),
+    cancelledBy: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { status: "cancelled" });
+    await enforcePermission(ctx.db, args.cancelledBy || "admin", "editAppointment");
+    const selected = await ctx.db.get(args.id);
+    if (!selected) {
+      throw new Error("Appointment not found");
+    }
+
+    const cancelReason = args.cancelReason ?? "Other";
+    const cancelNotes = args.cancelNotes ?? "";
+
+    if (args.cancelSeries && (selected.isRecurring || selected.parentAppointmentId)) {
+      const parentId = selected.parentAppointmentId ?? selected._id;
+
+      // Fetch all appointments belonging to this series
+      const allApts = await ctx.db
+        .query("appointments")
+        .filter((q) =>
+          q.or(
+            q.eq(q.field("_id"), parentId),
+            q.eq(q.field("parentAppointmentId"), parentId)
+          )
+        )
+        .collect();
+
+      const futureApts = allApts.filter(
+        (apt) => apt.startTime >= selected.startTime && apt.status !== "cancelled"
+      );
+
+      for (const apt of futureApts) {
+        await ctx.db.patch(apt._id, {
+          status: "cancelled",
+          cancelReason,
+          cancelNotes,
+        });
+      }
+    } else {
+      await ctx.db.patch(args.id, {
+        status: "cancelled",
+        cancelReason,
+        cancelNotes,
+      });
+    }
   },
 });
 
 // ── Mark patient as arrived ────────────────────────────────────────────
 export const markArrived = mutation({
-  args: { id: v.id("appointments") },
+  args: { 
+    id: v.id("appointments"),
+    updatedBy: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.updatedBy || "admin", "editAppointment");
     await ctx.db.patch(args.id, { status: "arrived" });
   },
 });
 
 // ── Complete appointment ────────────────────────────────────────────────
 export const complete = mutation({
-  args: { id: v.id("appointments") },
+  args: { 
+    id: v.id("appointments"),
+    updatedBy: v.optional(v.string()),
+  },
   handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.updatedBy || "admin", "editAppointment");
     await ctx.db.patch(args.id, { status: "completed" });
   },
 });
@@ -209,6 +353,8 @@ export const completeAndDraft = mutation({
     createdBy: v.string(),
   },
   handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.createdBy, "editAppointment");
+    await enforcePermission(ctx.db, args.createdBy, "createInvoice");
     const apt = await ctx.db.get(args.id);
     if (!apt) throw new Error("Appointment not found");
     await ctx.db.patch(args.id, { status: "completed" });
@@ -230,20 +376,76 @@ export const completeAndDraft = mutation({
     const now = Date.now();
     const aptDate = new Date(apt.startTime);
     const dateStr = `${aptDate.getDate()}/${aptDate.getMonth() + 1}/${aptDate.getFullYear()}`;
+
+    // Find service type by ID or name matching
+    let serviceType = null;
+    if (apt.serviceTypeId) {
+      serviceType = await ctx.db.get(apt.serviceTypeId);
+    }
+    if (!serviceType && apt.type) {
+      const allServiceTypes = await ctx.db.query("serviceTypes").collect();
+      serviceType = allServiceTypes.find(
+        (s) => s.name.toLowerCase() === apt.type!.toLowerCase()
+      ) || null;
+    }
+
+    const subtotal = serviceType ? serviceType.fixedPrice : 0;
+    const total = subtotal;
+
     const invoiceId = await ctx.db.insert("invoices", {
       invoiceNumber,
       patientId: apt.patientId,
       appointmentId: args.id,
       date: now,
       dueDate: now + 30 * 86400000,
-      subtotal: 0,
+      subtotal,
       tax: 0,
-      total: 0,
+      total,
       status: "draft",
-      notes: `Draft generated from appointment on ${dateStr}. Add line items before sending to patient.`,
+      notes: serviceType
+        ? `Draft from appointment on ${dateStr}.`
+        : `Draft from appointment on ${dateStr}. Add line items before sending to patient.`,
       createdBy: args.createdBy,
       createdAt: now,
     });
+
+    if (serviceType) {
+      // Add the service type line item
+      await ctx.db.insert("invoiceLineItems", {
+        invoiceId,
+        description: serviceType.name,
+        quantity: 1,
+        unitPrice: serviceType.fixedPrice,
+        total: serviceType.fixedPrice,
+      });
+
+      // Add the associated stock items (billed at K 0)
+      if (serviceType.stockItems) {
+        for (const si of serviceType.stockItems) {
+          const item = await ctx.db.get(si.stockItemId);
+          if (item) {
+            await ctx.db.insert("invoiceLineItems", {
+              invoiceId,
+              stockItemId: si.stockItemId,
+              description: `${item.name} (stock)`,
+              quantity: si.quantity,
+              unitPrice: item.pricePerItem,
+              total: 0,
+            });
+          }
+        }
+      }
+    } else {
+      // Fallback custom line item
+      await ctx.db.insert("invoiceLineItems", {
+        invoiceId,
+        description: apt.type || "Consultation",
+        quantity: 1,
+        unitPrice: 0,
+        total: 0,
+      });
+    }
+
     return { invoiceId };
   },
 });
@@ -327,6 +529,40 @@ export const listTodayUninvoiced = query({
       }
     }
     return uninvoiced;
+  },
+});
+
+// ── Archive appointment (soft delete) ───────────────────────────────────
+export const archive = mutation({
+  args: {
+    id: v.id("appointments"),
+    archivedBy: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.archivedBy, "archiveAppointment");
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Appointment not found");
+    await ctx.db.patch(args.id, {
+      isArchived: true,
+      archivedBy: args.archivedBy,
+      archivedAt: Date.now(),
+    });
+  },
+});
+
+// ── Restore archived appointment ────────────────────────────────────────
+export const restore = mutation({
+  args: { 
+    id: v.id("appointments"),
+    restoredBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.restoredBy || "admin", "archiveAppointment");
+    await ctx.db.patch(args.id, {
+      isArchived: false,
+      archivedBy: undefined,
+      archivedAt: undefined,
+    });
   },
 });
 

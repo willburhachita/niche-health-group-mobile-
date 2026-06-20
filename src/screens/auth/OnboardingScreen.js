@@ -8,7 +8,7 @@ import { radius } from '../../constants/radius';
 import { typography } from '../../constants/typography';
 import { AppText } from '../../components/common/AppText';
 import { Button } from '../../components/common/Button';
-import { TITLE_OPTIONS } from '../../data/mockAuth';
+import { TITLE_OPTIONS } from '../../utils/authHelpers';
 import { COUNTRY_CODES, DEFAULT_COUNTRY } from '../../data/countryCodes';
 import { useAuth } from '../../hooks/useAuth';
 

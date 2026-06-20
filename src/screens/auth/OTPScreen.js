@@ -18,15 +18,18 @@ export default function OTPScreen({ navigation, route }) {
   const [timer, setTimer] = useState(600); // 10 minutes
   const [verifying, setVerifying] = useState(false);
   const [resending, setResending] = useState(false);
+  const [isNotStaff, setIsNotStaff] = useState(route?.params?.isNotStaff || false);
   const inputs = useRef([]);
   const shakeAnim = useRef(new Animated.Value(0)).current;
   const email = route?.params?.email || '';
 
   useEffect(() => {
-    inputs.current[0]?.focus();
+    if (!isNotStaff) {
+      inputs.current[0]?.focus();
+    }
     const interval = setInterval(() => setTimer(t => t > 0 ? t - 1 : 0), 1000);
     return () => clearInterval(interval);
-  }, []);
+  }, [isNotStaff]);
 
   const formatTimer = (s) => {
     const m = Math.floor(s / 60);
@@ -88,6 +91,7 @@ export default function OTPScreen({ navigation, route }) {
   const handleResend = async () => {
     setResending(true);
     setError('');
+    setIsNotStaff(false);
     setCode(['', '', '', '', '', '']);
     try {
       const result = await sendOTPCode({ email });
@@ -95,7 +99,11 @@ export default function OTPScreen({ navigation, route }) {
         setTimer(600);
         inputs.current[0]?.focus();
       } else {
-        setError(result.error || 'Failed to resend. Please try again.');
+        if (result.error === 'Account not found') {
+          setIsNotStaff(true);
+        } else {
+          setError(result.error || 'Failed to resend. Please try again.');
+        }
       }
     } catch {
       setError('Failed to resend. Please try again.');
@@ -125,53 +133,66 @@ export default function OTPScreen({ navigation, route }) {
           We sent a verification code to {maskedEmail}
         </AppText>
 
-        <Animated.View style={[styles.codeRow, { transform: [{ translateX: shakeAnim }] }]}>
-          {code.map((digit, i) => (
-            <TextInput
-              key={i}
-              ref={ref => inputs.current[i] = ref}
-              style={[styles.codeBox, digit && styles.codeBoxFilled, error && styles.codeBoxError]}
-              value={digit}
-              onChangeText={(text) => handleChange(text.replace(/[^0-9]/g, ''), i)}
-              onKeyPress={(e) => handleKeyPress(e, i)}
-              keyboardType="number-pad"
-              maxLength={1}
-              selectTextOnFocus
-            />
-          ))}
-        </Animated.View>
-
-        {verifying && (
-          <View style={styles.verifyingRow}>
-            <ActivityIndicator size="small" color={colors.navyBlue} />
-            <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Verifying...</AppText>
-          </View>
-        )}
-
-        {error ? (
-          <AppText variant="caption" color={colors.error} style={styles.error}>{error}</AppText>
-        ) : null}
-
-        {timer > 0 ? (
-          <AppText variant="caption" color={colors.mediumGrey} style={styles.timer}>
-            Code expires in {formatTimer(timer)}
-          </AppText>
-        ) : (
-          <AppText variant="caption" color={colors.error} style={styles.timer}>
-            Code expired
-          </AppText>
-        )}
-
-        {resending ? (
-          <View style={styles.resendRow}>
-            <ActivityIndicator size="small" color={colors.navyBlue} />
-            <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Sending new code...</AppText>
+        {isNotStaff ? (
+          <View style={styles.nonStaffContainer}>
+            <AppText variant="body" color={colors.error} style={styles.nonStaffText}>
+              You are not registered as a staff member. Please contact your administrator to be added using "Add Staff".
+            </AppText>
+            <Pressable onPress={() => navigation.navigate('Login')} style={styles.backBtn}>
+              <AppText variant="bodyBold" color={colors.white}>Back to Login</AppText>
+            </Pressable>
           </View>
         ) : (
-          <Pressable onPress={handleResend} style={styles.resendRow}>
-            <Feather name="refresh-cw" size={13} color={colors.navyBlue} />
-            <AppText variant="bodyBold" color={colors.navyBlue} style={styles.resend}>Resend Code</AppText>
-          </Pressable>
+          <>
+            <Animated.View style={[styles.codeRow, { transform: [{ translateX: shakeAnim }] }]}>
+              {code.map((digit, i) => (
+                <TextInput
+                  key={i}
+                  ref={ref => inputs.current[i] = ref}
+                  style={[styles.codeBox, digit && styles.codeBoxFilled, error && styles.codeBoxError]}
+                  value={digit}
+                  onChangeText={(text) => handleChange(text.replace(/[^0-9]/g, ''), i)}
+                  onKeyPress={(e) => handleKeyPress(e, i)}
+                  keyboardType="number-pad"
+                  maxLength={1}
+                  selectTextOnFocus
+                />
+              ))}
+            </Animated.View>
+
+            {verifying && (
+              <View style={styles.verifyingRow}>
+                <ActivityIndicator size="small" color={colors.navyBlue} />
+                <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Verifying...</AppText>
+              </View>
+            )}
+
+            {error ? (
+              <AppText variant="caption" color={colors.error} style={styles.error}>{error}</AppText>
+            ) : null}
+
+            {timer > 0 ? (
+              <AppText variant="caption" color={colors.mediumGrey} style={styles.timer}>
+                Code expires in {formatTimer(timer)}
+              </AppText>
+            ) : (
+              <AppText variant="caption" color={colors.error} style={styles.timer}>
+                Code expired
+              </AppText>
+            )}
+
+            {resending ? (
+              <View style={styles.resendRow}>
+                <ActivityIndicator size="small" color={colors.navyBlue} />
+                <AppText variant="caption" color={colors.navyBlue} style={{ marginLeft: spacing.sm }}>Sending new code...</AppText>
+              </View>
+            ) : (
+              <Pressable onPress={handleResend} style={styles.resendRow}>
+                <Feather name="refresh-cw" size={13} color={colors.navyBlue} />
+                <AppText variant="bodyBold" color={colors.navyBlue} style={styles.resend}>Resend Code</AppText>
+              </Pressable>
+            )}
+          </>
         )}
       </View>
     </SafeAreaView>
@@ -201,4 +222,28 @@ const styles = StyleSheet.create({
   verifyingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', marginBottom: spacing.sm },
   resendRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: spacing.xs, marginTop: spacing.sm },
   resend: { marginLeft: spacing.xs },
+  nonStaffContainer: {
+    backgroundColor: '#FEF2F2',
+    borderColor: '#FEE2E2',
+    borderWidth: 1,
+    borderRadius: radius.md,
+    padding: spacing.base,
+    alignItems: 'center',
+    gap: spacing.base,
+    marginTop: spacing.sm,
+  },
+  nonStaffText: {
+    textAlign: 'center',
+    ...typography.body,
+    color: colors.error,
+    lineHeight: 20,
+  },
+  backBtn: {
+    backgroundColor: colors.navyBlue,
+    borderRadius: radius.md,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xl,
+    marginTop: spacing.sm,
+    alignItems: 'center',
+  },
 });

@@ -1,23 +1,38 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 
 // ── Start a telehealth session ──────────────────────────────────────────
 export const startSession = mutation({
   args: {
-    appointmentId: v.id("appointments"),
+    appointmentId: v.optional(v.id("appointments")),
     patientId: v.id("patients"),
     providerId: v.string(),
+    invitees: v.optional(v.array(v.string())),
     createdBy: v.string(),
+    platform: v.optional(v.string()),
+    customRoomUrl: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    // Check if there's already an active session for this appointment
-    const existing = await ctx.db
-      .query("telehealthSessions")
-      .withIndex("by_appointmentId", (q) => q.eq("appointmentId", args.appointmentId))
-      .take(10);
-    const active = existing.find((s) => s.status === "active" || s.status === "waiting");
-    if (active) return active._id;
+    // Check for existing active session on same appointment
+    if (args.appointmentId) {
+      const existing = await ctx.db
+        .query("telehealthSessions")
+        .withIndex("by_appointmentId", (q) => q.eq("appointmentId", args.appointmentId!))
+        .take(10);
+      const active = existing.find((s) => s.status === "active" || s.status === "waiting");
+      if (active) return { sessionId: active._id, roomUrl: active.roomUrl };
+    }
+
+    // Determine platform and room URL
+    const platform = args.platform || "jitsi";
+    let roomUrl = "";
+    if (platform === "jitsi") {
+      const roomId = `nhl-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`;
+      roomUrl = `https://meet.jit.si/${roomId}`;
+    } else {
+      roomUrl = args.customRoomUrl || "";
+    }
 
     const sessionId = await ctx.db.insert("telehealthSessions", {
       appointmentId: args.appointmentId,
@@ -25,14 +40,33 @@ export const startSession = mutation({
       providerId: args.providerId,
       status: "active",
       startedAt: Date.now(),
+      roomUrl,
+      platform,
+      invitees: args.invitees || [],
       createdBy: args.createdBy,
       createdAt: Date.now(),
     });
 
-    // Mark appointment as in-progress (confirmed → active)
-    await ctx.db.patch(args.appointmentId, { status: "confirmed" });
+    // Mark appointment as confirmed if linked
+    if (args.appointmentId) {
+      await ctx.db.patch(args.appointmentId, { status: "confirmed" });
+    }
 
-    return sessionId;
+    // Notify each invitee
+    for (const invitee of args.invitees || []) {
+      await ctx.db.insert("inAppNotifications", {
+        userId: invitee,
+        type: "telehealth",
+        title: "You've been invited to a session",
+        body: `${args.providerId} started a telehealth session and invited you to join.`,
+        link: "/telehealth",
+        entityId: sessionId,
+        isRead: false,
+        createdAt: Date.now(),
+      });
+    }
+
+    return { sessionId, roomUrl };
   },
 });
 
@@ -82,8 +116,10 @@ export const endSession = mutation({
 
     await ctx.db.patch(args.sessionId, updates);
 
-    // Mark appointment as completed
-    await ctx.db.patch(session.appointmentId, { status: "completed" });
+    // Mark linked appointment as completed (if any)
+    if (session.appointmentId) {
+      await ctx.db.patch(session.appointmentId, { status: "completed" });
+    }
 
     return args.sessionId;
   },
@@ -146,6 +182,31 @@ export const getActiveForProvider = query({
   },
 });
 
+// ── List active sessions ───────────────────────────────────────────────
+export const listActive = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("telehealthSessions")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+  },
+});
+
+// ── Get sessions where user is an invitee ───────────────────────────────
+export const getInvitedSessions = query({
+  args: { userId: v.string() },
+  handler: async (ctx, args) => {
+    const active = await ctx.db
+      .query("telehealthSessions")
+      .withIndex("by_status", (q) => q.eq("status", "active"))
+      .collect();
+    return active.filter(
+      (s) => s.invitees?.includes(args.userId) && s.providerId !== args.userId
+    );
+  },
+});
+
 // ── List completed sessions (recent) ────────────────────────────────────
 export const listCompleted = query({
   args: { limit: v.optional(v.number()) },
@@ -169,5 +230,43 @@ export const listByProvider = query({
       .order("desc")
       .take(args.limit ?? 100);
     return all.filter((s) => s.providerId === args.providerId);
+  },
+});
+
+// ── Track who joined the call ────────────────────────────────────────────
+export const joinSession = mutation({
+  args: {
+    sessionId: v.id("telehealthSessions"),
+    userId: v.string(),
+    displayName: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) return null;
+    const existing = (session.participants || []);
+    if (existing.find((p) => p.userId === args.userId)) return args.sessionId;
+    await ctx.db.patch(args.sessionId, {
+      participants: [...existing, {
+        userId: args.userId,
+        displayName: args.displayName,
+        joinedAt: Date.now(),
+      }],
+    });
+    return args.sessionId;
+  },
+});
+
+// ── Remove participant when they leave ──────────────────────────────────
+export const leaveSession = mutation({
+  args: {
+    sessionId: v.id("telehealthSessions"),
+    userId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const session = await ctx.db.get(args.sessionId);
+    if (!session) return null;
+    await ctx.db.patch(args.sessionId, {
+      participants: (session.participants || []).filter((p) => p.userId !== args.userId),
+    });
   },
 });

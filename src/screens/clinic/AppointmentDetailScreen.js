@@ -50,6 +50,14 @@ export default function AppointmentDetailScreen({ route, navigation }) {
   const [completing, setCompleting] = useState(false);
   const [draftInvoiceId, setDraftInvoiceId] = useState(null);
 
+  // Also query appointment's linked invoice (persists across navigation)
+  const linkedInvoices = useQuery(
+    api.invoices.listByAppointment,
+    appointmentId ? { appointmentId } : 'skip'
+  );
+  const persistedInvoiceId = draftInvoiceId ||
+    (linkedInvoices && linkedInvoices.length > 0 ? linkedInvoices[0]._id : null);
+
   const statusLabel = STATUS_LABELS[appointment?.status] || appointment?.status || '';
   const dotColor = statusColors[appointment?.status] || colors.mediumGrey;
 
@@ -236,11 +244,11 @@ export default function AppointmentDetailScreen({ route, navigation }) {
                 label="View Treatment Notes"
                 onPress={() => navigation.navigate('TreatmentNote', { patientId: appointment.patientId })}
               />
-              {draftInvoiceId && (
+              {persistedInvoiceId && (
                 <Button
-                  label="Review Draft Invoice"
+                  label="Review & Edit Draft Invoice"
                   variant="secondary"
-                  onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: draftInvoiceId })}
+                  onPress={() => navigation.navigate('InvoiceDetail', { invoiceId: persistedInvoiceId, allowEdit: true })}
                 />
               )}
             </>

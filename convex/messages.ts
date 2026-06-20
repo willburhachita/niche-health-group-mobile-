@@ -39,15 +39,34 @@ export const getMessages = query({
     const msgs = await ctx.db
       .query("messages")
       .withIndex("by_conversation", (q) => q.eq("conversationId", conversationId))
-      .collect();
+      .order("desc")
+      .take(100);
+    msgs.reverse();
     console.log(`[MSG] getMessages for ${conversationId}: returned ${msgs.length} messages`);
     const visible = viewerId ? msgs.filter(m => !m.hiddenBy?.includes(viewerId)) : msgs;
+
+    // Build sender name map
+    const senderIds = [...new Set(visible.map(m => m.senderId))];
+    const nameMap: Record<string, string> = {};
+    for (const sid of senderIds) {
+      // 1. Try users table by externalId (matches staffAccounts.userId format)
+      const user = await ctx.db.query("users").withIndex("by_externalId", q => q.eq("externalId", sid)).first();
+      if (user) { nameMap[sid] = user.displayName; continue; }
+      // 2. Try staffAccounts by userId field directly
+      const accByUid = await ctx.db.query("staffAccounts").withIndex("by_userId", q => q.eq("userId", sid)).first();
+      if (accByUid) { nameMap[sid] = accByUid.displayName || accByUid.email; continue; }
+      // 3. Try staffAccounts by email (senderId may be stored as email)
+      const accByEmail = await ctx.db.query("staffAccounts").withIndex("by_email", q => q.eq("email", sid)).first();
+      if (accByEmail) nameMap[sid] = accByEmail.displayName || accByEmail.email;
+    }
+
     return await Promise.all(visible.map(async (msg) => {
+      const senderName = nameMap[msg.senderId] ?? null;
       if ((msg.type === "voice" || msg.type === "file" || msg.type === "image") && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
         const url = await ctx.storage.getUrl(msg.fileUrl as any);
-        return { ...msg, fileUrl: url ?? msg.fileUrl };
+        return { ...msg, senderName, fileUrl: url ?? msg.fileUrl };
       }
-      return msg;
+      return { ...msg, senderName };
     }));
   },
 });
@@ -165,6 +184,28 @@ export const markConversationRead = mutation({
     const unreadBy = { ...(conv.unreadBy ?? {}), [userId]: false };
     const readAt = { ...(conv.readAt ?? {}), [userId]: Date.now() };
     await ctx.db.patch(conversationId, { unreadBy, readAt });
+  },
+});
+
+export const unreadMessagesCount = query({
+  args: { userId: v.string() },
+  handler: async (ctx, { userId }) => {
+    const convos = await ctx.db.query("conversations").collect();
+    const unreadConvos = convos.filter(
+      (c) => c.members.includes(userId) && c.unreadBy?.[userId] === true
+    );
+    
+    let total = 0;
+    for (const conv of unreadConvos) {
+      const lastReadTime = conv.readAt?.[userId] ?? 0;
+      const msgs = await ctx.db
+        .query("messages")
+        .withIndex("by_conversation", (q) => q.eq("conversationId", conv._id))
+        .filter((q) => q.gt(q.field("sentAt"), lastReadTime))
+        .collect();
+      total += msgs.length;
+    }
+    return total;
   },
 });
 

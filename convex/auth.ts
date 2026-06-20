@@ -1,5 +1,6 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { enforcePermission } from "./utils/permissions";
 
 // ── Queries ────────────────────────────────────────────────────────────
 
@@ -135,6 +136,7 @@ export const createStaffAccount = mutation({
     createdBy: v.string(),
   },
   handler: async (ctx, { email, role, password, createdBy }) => {
+    await enforcePermission(ctx.db, createdBy, "manageStaff");
     console.log(`[AUTH] 🆕 createStaffAccount: email=${email}, role=${role}, createdBy=${createdBy}`);
 
     // Check if an account with this email already exists
@@ -288,6 +290,77 @@ export const completeOnboarding = mutation({
   },
 });
 
+// ── Update staff profile (used by Settings screen) ─────────────────────
+export const updateProfile = mutation({
+  args: {
+    accountId: v.id("staffAccounts"),
+    title: v.optional(v.string()),
+    fullName: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    department: v.optional(v.string()),
+    bio: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const account = await ctx.db.get(args.accountId);
+    if (!account) throw new Error("Staff account not found");
+
+    // Build display name when title/fullName changed
+    const title = args.title ?? account.title ?? "";
+    const fullName = args.fullName ?? account.fullName ?? "";
+    const parts = fullName.split(" ").filter(Boolean);
+    const surname = parts[0] || "";
+    const firstInitial = parts[1] ? ` ${parts[1].charAt(0).toUpperCase()}.` : "";
+    const displayName = title ? `${title}. ${surname}${firstInitial}` : (fullName || account.displayName || account.email);
+
+    const accountUpdates: Record<string, unknown> = {};
+    if (args.title !== undefined) accountUpdates.title = args.title;
+    if (args.fullName !== undefined) accountUpdates.fullName = args.fullName;
+    if (args.phone !== undefined) accountUpdates.phone = args.phone;
+    if (args.title !== undefined || args.fullName !== undefined) {
+      accountUpdates.displayName = displayName;
+    }
+    if (Object.keys(accountUpdates).length > 0) {
+      await ctx.db.patch(args.accountId, accountUpdates);
+    }
+
+    // Mirror profile fields to users table
+    const userProfile = await ctx.db
+      .query("users")
+      .withIndex("by_externalId", (q) => q.eq("externalId", account.userId))
+      .first();
+    if (userProfile) {
+      const firstName = parts[1] || parts[0] || userProfile.firstName;
+      const lastName = parts[0] || userProfile.lastName;
+      const initials = `${firstName.charAt(0)}${lastName.charAt(0)}`.toUpperCase();
+      const userUpdates: Record<string, unknown> = {};
+      if (args.title !== undefined || args.fullName !== undefined) {
+        userUpdates.displayName = displayName;
+        userUpdates.firstName = firstName;
+        userUpdates.lastName = lastName;
+        userUpdates.initials = initials;
+      }
+      if (args.phone !== undefined) userUpdates.phone = args.phone;
+      if (args.department !== undefined) userUpdates.department = args.department;
+      if (args.bio !== undefined) userUpdates.bio = args.bio;
+      if (Object.keys(userUpdates).length > 0) {
+        await ctx.db.patch(userProfile._id, userUpdates);
+      }
+    }
+
+    await ctx.db.insert("activityLogs", {
+      action: "Profile Updated",
+      category: "staff",
+      performedBy: account.email,
+      target: account.email,
+      details: `Profile updated for ${account.email}`,
+      timestamp: Date.now(),
+    });
+
+    console.log(`[AUTH] ✅ updateProfile for ${account.email} -> ${displayName}`);
+    return { success: true, displayName };
+  },
+});
+
 export const addTrustedDevice = mutation({
   args: { accountId: v.id("staffAccounts"), deviceId: v.string() },
   handler: async (ctx, { accountId, deviceId }) => {
@@ -348,6 +421,29 @@ export const createDeviceRequest = mutation({
     );
     if (dup) {
       console.log(`[AUTH] ℹ️ Duplicate pending request already exists: ${dup._id}`);
+      
+      // Still notify all active Admins so they see it on repeated login attempts
+      try {
+        const staff = await ctx.db.query("staffAccounts").collect();
+        const admins = staff.filter((s) => s.role === "admin" && s.isActive);
+        for (const admin of admins) {
+          const recipientId = admin.userId || admin.email;
+          await ctx.db.insert("inAppNotifications", {
+            userId: recipientId,
+            type: "system",
+            title: "Device Approval Pending",
+            body: `A login attempt on device "${deviceName || 'Unknown'}" (${platform || 'Mobile'}) is awaiting admin approval.`,
+            link: "/admin/devices",
+            entityId: dup._id,
+            isRead: false,
+            createdAt: Date.now(),
+          });
+        }
+        console.log(`[AUTH] 🔔 Duplicate request reminder sent to ${admins.length} admins`);
+      } catch (e) {
+        console.error(`[AUTH] ❌ Failed to send duplicate device request notifications`, e);
+      }
+
       return dup._id;
     }
     const id = await ctx.db.insert("deviceRequests", {
@@ -359,6 +455,30 @@ export const createDeviceRequest = mutation({
       requestedAt: Date.now(),
     });
     console.log(`[AUTH] ✅ Device request created: ${id}`);
+
+    // Notify all active Admins about the new device approval request
+    try {
+      const staff = await ctx.db.query("staffAccounts").collect();
+      const admins = staff.filter((s) => s.role === "admin" && s.isActive);
+      for (const admin of admins) {
+        // Resolve friendly recipient ID (email or userId as per schema guidelines)
+        const recipientId = admin.userId || admin.email;
+        await ctx.db.insert("inAppNotifications", {
+          userId: recipientId,
+          type: "system",
+          title: "New Device Approval Request",
+          body: `A login attempt on device "${deviceName || 'Unknown'}" (${platform || 'Mobile'}) requires admin approval.`,
+          link: "/admin/devices",
+          entityId: id,
+          isRead: false,
+          createdAt: Date.now(),
+        });
+      }
+      console.log(`[AUTH] 🔔 Device request notifications sent to ${admins.length} admins`);
+    } catch (e) {
+      console.error(`[AUTH] ❌ Failed to create admin notifications for device request`, e);
+    }
+
     return id;
   },
 });
@@ -498,6 +618,14 @@ export const clearAllDeviceRequests = mutation({
   },
 });
 
+// ── Staff Listing ─────────────────────────────────────────────────────
+export const listStaff = query({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("staffAccounts").collect();
+  },
+});
+
 // ── Device Request Queries ──────────────────────────────────────────────
 
 export const listDeviceRequests = query({
@@ -527,6 +655,7 @@ export const approveDeviceRequest = mutation({
     adminId: v.string(),
   },
   handler: async (ctx, { requestId, adminId }) => {
+    await enforcePermission(ctx.db, adminId, "approveDevices");
     const req = await ctx.db.get(requestId);
     if (!req) throw new Error("Device request not found");
     console.log(`[AUTH] ✅ Approving device request ${requestId} (staff=${req.staffId}, device=${req.deviceId})`);
@@ -566,6 +695,7 @@ export const rejectDeviceRequest = mutation({
     adminId: v.string(),
   },
   handler: async (ctx, { requestId, adminId }) => {
+    await enforcePermission(ctx.db, adminId, "approveDevices");
     const req = await ctx.db.get(requestId);
     if (!req) throw new Error("Device request not found");
     console.log(`[AUTH] ❌ Rejecting device request ${requestId}`);
@@ -581,6 +711,44 @@ export const rejectDeviceRequest = mutation({
       performedBy: adminId,
       target: req.deviceName || req.deviceId,
       details: `Device ${req.deviceName || req.deviceId} rejected for staff ${req.staffId}`,
+      timestamp: Date.now(),
+    });
+
+    return { success: true };
+  },
+});
+
+export const updateStaffRoleAndPermissions = mutation({
+  args: {
+    accountId: v.id("staffAccounts"),
+    role: v.string(),
+    permissions: v.array(v.string()),
+    adminEmail: v.string(),
+  },
+  handler: async (ctx, { accountId, role, permissions, adminEmail }) => {
+    await enforcePermission(ctx.db, adminEmail, "manageStaff");
+    const account = await ctx.db.get(accountId);
+    if (!account) throw new Error("Account not found");
+
+    console.log(`[AUTH] 🔐 updateStaffRoleAndPermissions for ${account.email}: role=${role}, permsCount=${permissions.length}`);
+
+    await ctx.db.patch(accountId, { role, permissions });
+
+    // Sync to users table (profile table)
+    const userProfile = await ctx.db
+      .query("users")
+      .withIndex("by_externalId", (q) => q.eq("externalId", account.userId))
+      .first();
+    if (userProfile) {
+      await ctx.db.patch(userProfile._id, { staffRole: role });
+    }
+
+    await ctx.db.insert("activityLogs", {
+      action: "Staff Permissions Updated",
+      category: "staff",
+      performedBy: adminEmail,
+      target: account.email,
+      details: `Permissions updated for ${account.email}. Role: ${role}, Custom Perms: ${permissions.length} items`,
       timestamp: Date.now(),
     });
 

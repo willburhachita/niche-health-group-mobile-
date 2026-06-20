@@ -1,6 +1,21 @@
 import { query, mutation } from "./_generated/server";
 import { v } from "convex/values";
 
+// ── Storage helpers ─────────────────────────────────────────────────────
+export const generateUploadUrl = mutation({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.storage.generateUploadUrl();
+  },
+});
+
+export const getStorageUrl = query({
+  args: { storageId: v.id("_storage") },
+  handler: async (ctx, args) => {
+    return await ctx.storage.getUrl(args.storageId);
+  },
+});
+
 export const listFiles = query({
   handler: async (ctx) => {
     const files = await ctx.db.query("files").collect();
@@ -17,6 +32,8 @@ export const uploadFileRecord = mutation({
     uploadedBy: v.optional(v.string()),
     storageId: v.optional(v.string()),
     parentFolderId: v.optional(v.id("files")),
+    patientId: v.optional(v.id("patients")),
+    category: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     console.log(`[FILES] 📁 uploadFileRecord: name=${args.name}, type=${args.fileType}, size=${args.size}`);
@@ -26,6 +43,43 @@ export const uploadFileRecord = mutation({
     });
     console.log(`[FILES] ✅ File record created: ${id}`);
     return id;
+  },
+});
+
+export const listByPatient = query({
+  args: { patientId: v.id("patients") },
+  handler: async (ctx, args) => {
+    const files = await ctx.db
+      .query("files")
+      .withIndex("by_patientId", (q) => q.eq("patientId", args.patientId))
+      .order("desc")
+      .collect();
+
+    const filesWithUrls = [];
+    for (const file of files) {
+      let url = null;
+      if (file.storageId) {
+        url = await ctx.storage.getUrl(file.storageId);
+      }
+      filesWithUrls.push({
+        ...file,
+        url,
+      });
+    }
+    return filesWithUrls;
+  },
+});
+
+export const deleteFileRecord = mutation({
+  args: { id: v.id("files") },
+  handler: async (ctx, args) => {
+    const file = await ctx.db.get(args.id);
+    if (!file) throw new Error("File not found");
+    if (file.storageId) {
+      await ctx.storage.delete(file.storageId);
+    }
+    await ctx.db.delete(args.id);
+    return true;
   },
 });
 

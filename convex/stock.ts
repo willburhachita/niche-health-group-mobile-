@@ -11,7 +11,8 @@ export const list = query({
         .withIndex("by_status", (q) => q.eq("status", args.status!))
         .take(200);
     }
-    return await ctx.db.query("stockItems").take(200);
+    const results = await ctx.db.query("stockItems").take(200);
+    return results.filter((i) => !i.isArchived);
   },
 });
 
@@ -129,6 +130,7 @@ export const adjust = mutation({
     quantity: v.number(),
     notes: v.optional(v.string()),
     adjustedBy: v.string(),
+    newExpiryDate: v.optional(v.number()), // override expiry when adding new batch
   },
   handler: async (ctx, args) => {
     const item = await ctx.db.get(args.stockItemId);
@@ -140,11 +142,16 @@ export const adjust = mutation({
         ? previousLevel + args.quantity
         : Math.max(0, previousLevel - args.quantity);
 
-    await ctx.db.patch(args.stockItemId, {
+    const patchData: Record<string, unknown> = {
       stockLevel: newLevel,
       updatedBy: args.adjustedBy,
       updatedAt: Date.now(),
-    });
+    };
+    if (args.adjustmentType === "increase" && args.newExpiryDate !== undefined) {
+      patchData.expiryDate = args.newExpiryDate;
+    }
+
+    await ctx.db.patch(args.stockItemId, patchData as any);
 
     await ctx.db.insert("stockAdjustments", {
       stockItemId: args.stockItemId,
@@ -156,6 +163,53 @@ export const adjust = mutation({
       notes: args.notes,
       adjustedBy: args.adjustedBy,
       adjustedAt: Date.now(),
+      source: "manual",
+    });
+  },
+});
+
+// ── Archive stock item (soft delete) ────────────────────────────────────
+export const archive = mutation({
+  args: {
+    id: v.id("stockItems"),
+    archivedBy: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Stock item not found");
+    await ctx.db.patch(args.id, {
+      isArchived: true,
+      archivedBy: args.archivedBy,
+      archivedAt: Date.now(),
+    });
+  },
+});
+
+// ── Restore archived stock item ─────────────────────────────────────────
+export const restore = mutation({
+  args: { id: v.id("stockItems") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      isArchived: false,
+      archivedBy: undefined,
+      archivedAt: undefined,
+    });
+  },
+});
+
+// ── Add note to stock item ──────────────────────────────────────────────
+export const addNote = mutation({
+  args: {
+    id: v.id("stockItems"),
+    text: v.string(),
+    author: v.string(),
+  },
+  handler: async (ctx, { id, text, author }) => {
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Stock item not found");
+    const existing = item.stockNotes || [];
+    await ctx.db.patch(id, {
+      stockNotes: [...existing, { text, author, timestamp: Date.now() }],
     });
   },
 });

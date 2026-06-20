@@ -14,6 +14,7 @@ import { Card } from '../../components/common/Card';
 import { Divider } from '../../components/common/Divider';
 import { formatTimestamp } from '../../utils/dateHelpers';
 import { useAlert } from '../../components/common/CustomAlert';
+import { Badge } from '../../components/common/Badge';
 
 export default function AdminDeviceApprovalsScreen({ navigation }) {
   const { currentAccount } = useAuth();
@@ -89,11 +90,18 @@ export default function AdminDeviceApprovalsScreen({ navigation }) {
           pending.map(d => (
             <Card key={d._id} variant="highlighted" style={styles.deviceCard}>
               <View style={styles.row}>
-                <View style={styles.iconBoxWarning}>
-                  <Feather name="smartphone" size={20} color={colors.warning} />
+                <View style={styles.iconBoxPending}>
+                  <Feather name="smartphone" size={20} color="#3B82F6" />
                 </View>
                 <View style={{ flex: 1 }}>
-                  <AppText variant="bodyBold">{d.deviceName || 'Unknown Device'}</AppText>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.sm, flexWrap: 'wrap', marginBottom: 2 }}>
+                    <AppText variant="bodyBold">{d.deviceName || 'Unknown Device'}</AppText>
+                    <Badge 
+                      label="Pending" 
+                      variant="role" 
+                      style={{ backgroundColor: 'rgba(59, 130, 246, 0.12)' }} 
+                    />
+                  </View>
                   <AppText variant="caption" color={colors.darkGrey}>
                     Requested by {d.staffName} • {formatTimestamp(d.requestedAt)}
                   </AppText>
@@ -126,14 +134,20 @@ export default function AdminDeviceApprovalsScreen({ navigation }) {
             {history.map((d, i, arr) => (
               <View key={d._id}>
                 <View style={styles.historyRow}>
-                  <View style={[styles.statusDot, { backgroundColor: d.status === 'approved' ? colors.success : colors.error }]} />
+                  <View style={[styles.statusDot, { backgroundColor: d.status === 'approved' ? '#10B981' : '#EF4444' }]} />
                   <View style={{ flex: 1 }}>
                     <AppText variant="bodyBold">{d.deviceName || 'Unknown Device'}</AppText>
                     <AppText variant="caption" color={colors.darkGrey}>{d.staffName} • {formatTimestamp(d.reviewedAt || d.requestedAt)}</AppText>
                   </View>
-                  <AppText variant="caption" color={d.status === 'approved' ? colors.success : colors.error}>
-                    {d.status.toUpperCase()}
-                  </AppText>
+                  <Badge 
+                    label={d.status === 'approved' ? 'Approved' : 'Rejected'} 
+                    variant={d.status === 'approved' ? 'success' : 'unread'} 
+                    style={
+                      d.status === 'approved' 
+                        ? { backgroundColor: 'rgba(16, 185, 129, 0.12)', color: '#10B981' } 
+                        : { backgroundColor: 'rgba(239, 68, 68, 0.12)', color: '#EF4444' }
+                    }
+                  />
                 </View>
                 {i < arr.length - 1 && <Divider type="inset" />}
               </View>
@@ -155,6 +169,7 @@ const styles = StyleSheet.create({
   deviceCard: { padding: spacing.base, marginBottom: spacing.sm },
   row: { flexDirection: 'row', alignItems: 'center', marginBottom: spacing.md },
   iconBoxWarning: { width: 44, height: 44, borderRadius: 22, backgroundColor: colors.warning + '20', alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
+  iconBoxPending: { width: 44, height: 44, borderRadius: 22, backgroundColor: 'rgba(59, 130, 246, 0.12)', alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
   actionRow: { flexDirection: 'row', gap: spacing.sm },
   approveBtn: { flex: 1, flexDirection: 'row', backgroundColor: colors.navyBlue, paddingVertical: spacing.sm, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },
   rejectBtn: { flex: 1, flexDirection: 'row', backgroundColor: colors.white, borderWidth: 1.5, borderColor: colors.error, paddingVertical: spacing.sm, borderRadius: radius.full, alignItems: 'center', justifyContent: 'center' },

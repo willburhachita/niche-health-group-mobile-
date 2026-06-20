@@ -34,18 +34,22 @@ const statusStyles = {
   paid: { color: colors.success, bg: colors.success + '14', label: 'Paid' },
   unpaid: { color: colors.warning, bg: colors.warning + '14', label: 'Unpaid' },
   overdue: { color: colors.error, bg: colors.error + '14', label: 'Overdue' },
+  draft: { color: colors.darkGrey, bg: colors.offWhite, label: 'Draft' },
 };
 
 export default function InvoiceDetailScreen({ route, navigation }) {
-  const { invoiceId } = route.params;
+  const { invoiceId, allowEdit } = route.params;
   const alert = useAlert();
-  const { currentAccount } = useAuth();
+  const { currentAccount, role } = useAuth();
+  const canEditInvoice = role === 'admin';
+
   const invoice = useQuery(api.invoices.get, { id: invoiceId });
   const patient = useQuery(api.patients.get, invoice?.patientId ? { id: invoice.patientId } : 'skip');
   const appointment = useQuery(api.appointments.get, invoice?.appointmentId ? { id: invoice.appointmentId } : 'skip');
   const creator = useQuery(api.auth.getStaffByUserId, invoice?.createdBy ? { userId: invoice.createdBy } : 'skip');
   const recordPayment = useMutation(api.paymentsClinic.create);
   const markAsPaid = useMutation(api.invoices.markAsPaid);
+  const updateStatus = useMutation(api.invoices.updateStatus);
   const sendEmail = useAction(api.notifications.sendInvoiceEmail);
   const status = statusStyles[invoice?.status] || statusStyles.unpaid;
   const [showPayModal, setShowPayModal] = useState(false);
@@ -288,10 +292,38 @@ export default function InvoiceDetailScreen({ route, navigation }) {
 
         {/* Actions */}
         <View style={styles.actions}>
-          {(invoice.status === 'unpaid' || invoice.status === 'overdue') && (
+          {/* Edit Draft — shown when navigated from Appointment Detail with allowEdit=true */}
+          {allowEdit && (invoice?.status === 'unpaid' || invoice?.status === 'draft') && (
+            <Button
+              label="Edit Draft Invoice"
+              onPress={() => navigation.navigate('CreateInvoice', { invoiceId })}
+            />
+          )}
+          {/* Admin edit for any invoice */}
+          {!allowEdit && canEditInvoice && invoice?.status !== 'paid' && (
+            <Button
+              label="Edit Invoice (Admin)"
+              variant="secondary"
+              onPress={() => navigation.navigate('CreateInvoice', { invoiceId })}
+            />
+          )}
+          {invoice.status === 'draft' && (
+            <Button
+              label="Issue (Mark Unpaid)"
+              onPress={async () => {
+                try {
+                  await updateStatus({ id: invoiceId, status: 'unpaid' });
+                  alert({ type: 'success', title: 'Invoice Issued', message: `${invoice.invoiceNumber} is now marked as unpaid.` });
+                } catch (e) {
+                  alert({ type: 'warning', title: 'Error', message: e.message || 'Failed to update status.' });
+                }
+              }}
+            />
+          )}
+          {(invoice.status === 'unpaid' || invoice.status === 'overdue' || invoice.status === 'draft') && (
             <Button label="Record Payment" onPress={() => setShowPayModal(true)} />
           )}
-          {(invoice.status === 'unpaid' || invoice.status === 'overdue') && (
+          {(invoice.status === 'unpaid' || invoice.status === 'overdue' || invoice.status === 'draft') && (
             <Pressable style={styles.markPaidBtn} onPress={() => setShowPaidConfirm(true)}>
               <Feather name="check-circle" size={16} color={colors.success} />
               <AppText variant="bodyBold" color={colors.success} style={{ marginLeft: spacing.sm }}>Mark as Paid</AppText>

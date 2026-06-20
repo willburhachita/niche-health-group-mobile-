@@ -1,0 +1,125 @@
+{
+  "name": "nhl-connect-desktop",
+  "version": "1.0.0",
+  "description": "NHL Connect Desktop — Niche Healthcare Limited",
+  "main": "electron/main.cjs",
+  "private": true,
+  "scripts": {
+    "dev": "concurrently -k -n VITE,ELECTRON -c cyan,yellow \"vite\" \"npm run electron:wait\"",
+    "electron:wait": "wait-on http://localhost:5173 && cross-env NODE_ENV=development electron .",
+    "build": "vite build",
+    "preview": "vite preview",
+    "dist": "electron-builder --win --x64",
+    "package": "npm run build && npm run dist",
+    "package:all": "npm run build && electron-builder -mwl",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.8",
+    "clsx": "^2.1.1",
+    "convex": "^1.36.0",
+    "date-fns": "^3.6.0",
+    "lucide-react": "^0.469.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.54.2",
+    "react-router-dom": "^7.1.1",
+    "recharts": "^2.15.0",
+    "tailwind-merge": "^2.6.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2",
+    "@types/node": "^22.10.5",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "concurrently": "^9.1.2",
+    "cross-env": "^7.0.3",
+    "electron": "^33.3.1",
+    "electron-builder": "^25.1.8",
+    "jsdom": "^29.1.1",
+    "png-to-ico": "^3.0.1",
+    "postcss": "^8.5.1",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3",
+    "vite": "^6.0.7",
+    "vitest": "^4.1.9",
+    "wait-on": "^8.0.1"
+  },
+  "build": {
+    "appId": "com.nichehealthcaregroup.connect-desktop",
+    "productName": "NHL Connect",
+    "electronDist": "node_modules/electron/dist",
+    "copyright": "Copyright © 2026 Niche Healthcare Limited",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "electron/**/*",
+      "node_modules/**/*",
+      "public/logo.png",
+      "public/logo.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "public/logo.png",
+        "to": "logo.png"
+      },
+      {
+        "from": "public/logo.ico",
+        "to": "logo.ico"
+      },
+      {
+        "from": "public/logo.png",
+        "to": "app/logo.png"
+      },
+      {
+        "from": "public/logo.ico",
+        "to": "app/logo.ico"
+      }
+    ],
+    "icon": "public/logo.png",
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/logo.ico",
+      "sign": null,
+      "signAndEditExecutable": false
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "installerIcon": "public/logo.ico",
+      "uninstallerIcon": "public/logo.ico",
+      "installerHeaderIcon": "public/logo.ico",
+      "installerSidebar": "public/installer-sidebar.bmp",
+      "installerHeader": "public/installer-header.bmp",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NHL Connect",
+      "license": null,
+      "artifactName": "NHL-Connect-Setup-${version}.exe"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "public/logo.png"
+    }
+  }
+}

@@ -1,0 +1,560 @@
+================================================================
+        NHL CONNECT - APP TESTING GUIDE
+        Niche Healthcare Limited
+        Version 1.0 | April 2026
+================================================================
+
+BEFORE YOU START
+----------------
+- Install the app (niche.apk) on your Android phone
+- Go to Settings > Security > enable "Install from unknown sources"
+- Make sure you have internet/WiFi
+- You will need access to the email inbox you log in with
+  (a verification code will be sent to it each time you log in)
+
+
+================================================================
+SECTION 1 — LOGGING IN
+================================================================
+
+The app has 3 types of staff accounts. For testing, use the
+ADMIN account which has access to everything:
+
+  Email:    wilburhachita@gmail.com
+  Password: Michelle13//.
+
+STEP-BY-STEP LOGIN:
+1. Open the app. Wait for the splash/logo screen to pass.
+2. Tap "Get Started" on the Welcome screen.
+3. Enter the email address above and tap "Continue".
+4. Check the email inbox — a 6-digit code will arrive from
+   noreply@nichehealthcaregroup.com
+5. Type the 6-digit code into the verification screen.
+6. Enter the password above on the Password screen.
+7. You should land on the Home screen.
+
+   WHAT TO NOTE:
+   - The code expires in 10 minutes. If it expires, go back
+     and request a new one.
+   - If the code email does not arrive, check Spam/Junk folder.
+
+
+================================================================
+SECTION 2 — HOME SCREEN
+================================================================
+
+After logging in you will see the Home screen with:
+
+- A greeting at the top ("Good morning / afternoon / evening")
+- TODAY'S STATS cards showing:
+    Total Appointments | Pending | Confirmed | Arrived | Completed
+- NEXT APPOINTMENT card (the next upcoming one today)
+- TODAY'S SCHEDULE list of all appointments for the day
+
+   WHAT TO TEST:
+   [ ] Stats cards display numbers (even if 0 — that is fine for
+       a fresh database)
+   [ ] Tapping the Next Appointment card takes you to its detail
+   [ ] The bottom tab bar has 5 tabs:
+       Home | Messages | Channels | Schedule | More
+
+
+================================================================
+SECTION 3 — MESSAGING (Direct Messages)
+================================================================
+
+Tap the MESSAGES tab (speech bubble icon).
+
+You will see a list of conversations. The seeded conversations
+are between staff members.
+
+   WHAT TO TEST:
+   [ ] Conversations list loads with names and last message preview
+   [ ] Tap any conversation to open the chat
+   [ ] Read the existing messages in the chat
+   [ ] Type a message in the box at the bottom and send it
+   [ ] Message appears with your name and a timestamp
+   [ ] Tap the search icon at the top to search conversations
+   [ ] Tap the compose icon (pencil) to start a new conversation:
+       - Search for a staff name e.g. "Sarah" or "James"
+       - Tap their name and start a conversation
+
+SEEDED CONVERSATION EXAMPLES:
+- Dr. Mbewe & Nurse Phiri: Discussion about a patient in Bay 3
+  with elevated blood pressure (165/95)
+- Dr. Mbewe & Dr. Banda: Lab results for patient in Bay 1
+- Pharmacy Team group: Heparin stock discussion
+
+
+================================================================
+SECTION 4 — CHANNELS (Group Broadcasts)
+================================================================
+
+Tap the CHANNELS tab (hash icon).
+
+Channels are like notice boards for departments or teams.
+
+   WHAT TO TEST:
+   [ ] Channels list shows: Dialysis Team, Announcements,
+       General, Pharmacy
+   [ ] Tap "Dialysis Team" — read the bay allocations and
+       water quality messages
+   [ ] Look for a pinned message about the Monthly Clinical Audit
+   [ ] Tap "Announcements" — see the Updated SOPs announcement
+   [ ] Tap "General" to open it
+   [ ] In any channel, type a message and send it
+   [ ] Tap the info icon (top right) to see channel members
+
+
+================================================================
+SECTION 5 — SCHEDULE
+================================================================
+
+Tap the SCHEDULE tab (calendar icon).
+
+   WHAT TO TEST:
+   [ ] Calendar view shows today's date highlighted
+   [ ] Tap different dates to see if appointments appear
+   [ ] Tap the List view toggle (if available) to see a list view
+   [ ] Any appointment shown — tap it to see details
+
+
+================================================================
+SECTION 6 — CLINIC TOOLS
+================================================================
+
+Tap the MORE tab (grid icon at far right).
+
+Under "Clinic Tools" you will see the clinical management
+features. These are only visible to Admin and Moderator roles.
+
+--------------------------------------------------------------
+6A. CLINIC HUB
+--------------------------------------------------------------
+Tap "Clinic Hub" under Clinic Tools.
+
+This is the main dashboard for clinical operations.
+
+   WHAT TO TEST:
+   [ ] Quick action buttons are visible:
+       Patients | Appointments | Invoices | Stock | Payments | Expenses
+   [ ] Stats row shows numbers for today
+   [ ] Tap each quick action to confirm it navigates correctly
+
+--------------------------------------------------------------
+6B. PATIENTS
+--------------------------------------------------------------
+From Clinic Hub tap "Patients" OR go More > Patient Directory.
+
+   WHAT TO TEST:
+   [ ] Patient list loads (may be empty on a fresh database)
+   [ ] Tap the + button (top right) to ADD A NEW PATIENT:
+       - Full Name: e.g. "Mwansa Chilufya"
+       - Date of Birth: e.g. 15/03/1985
+       - Gender: Female
+       - Phone: +260977100001
+       - Email: mwansa.chilufya@gmail.com
+       - Address: Plot 45, Kabulonga, Lusaka
+       - Blood Type: O+
+       - Allergies: Penicillin
+       - Tap Save
+   [ ] New patient appears in the list
+   [ ] Tap the patient to open their profile
+   [ ] Patient profile shows tabs: Overview, Clinical, Billing
+   [ ] Tap Edit (pencil icon) to edit and update a field, then save
+
+--------------------------------------------------------------
+6C. APPOINTMENTS
+--------------------------------------------------------------
+From Clinic Hub tap "Appointments".
+
+   WHAT TO TEST — VIEW:
+   [ ] Appointments list loads (filtered by Today by default)
+   [ ] Toggle between Today / Upcoming / All
+
+   WHAT TO TEST — BOOK AN APPOINTMENT:
+   [ ] Tap the + button to Book Appointment:
+       - Search and select the patient you just created
+         (e.g. Mwansa Chilufya)
+       - Select a doctor: e.g. Dr. Sarah Mbewe
+       - Pick today's date
+       - Pick a time: e.g. 2:00 PM
+       - Appointment Type: Dialysis Session
+       - Notes: First session assessment
+       - Tap Save / Book
+   [ ] Appointment appears in the list with status "Pending"
+
+   WHAT TO TEST — APPOINTMENT WORKFLOW:
+   [ ] Tap the appointment you just created to open it
+   [ ] Tap "Mark as Arrived" — status changes to "Arrived"
+   [ ] Tap "Complete Appointment" — status changes to "Completed"
+       and a draft invoice is automatically created
+   [ ] You should see a button or message about the draft invoice
+
+--------------------------------------------------------------
+6D. INVOICES
+--------------------------------------------------------------
+From Clinic Hub tap "Invoices".
+
+   WHAT TO TEST:
+   [ ] Invoices list loads
+   [ ] The draft invoice created above should appear with
+       status "Draft"
+   [ ] Tap the draft invoice to open it
+   [ ] Review the invoice details (patient, date, items)
+   [ ] Tap "Add Item" or the edit option to add a service:
+       - Description: Haemodialysis Session
+       - Quantity: 1
+       - Unit Price: K 850.00
+   [ ] Tap Save / Update
+   [ ] Tap "Finalize Invoice" to convert from Draft to Final
+   [ ] Invoice status changes to "Unpaid" or "Open"
+
+   WHAT TO TEST — CREATE INVOICE MANUALLY:
+   [ ] Tap + to create a new invoice
+   [ ] Select a patient
+   [ ] Add line items with prices
+   [ ] Add any notes
+   [ ] Save as draft or finalize
+
+--------------------------------------------------------------
+6E. STOCK & INVENTORY
+--------------------------------------------------------------
+More > Clinic Tools > Stock (or from Clinic Hub > Stock).
+
+   WHAT TO TEST:
+   [ ] Stock list loads with items (may be empty on fresh database)
+   [ ] Tap + to add a new stock item:
+       - Item Name: Heparin Sodium
+       - Item Code: MED-001
+       - Category: Medication
+       - Quantity: 450
+       - Unit: Units
+       - Unit Cost: K 12.50
+       - Supplier: (leave blank or add one)
+       - Expiry Date: 31/12/2026
+       - Tap Save
+   [ ] Item appears in the list
+   [ ] Tap the item to view its detail page
+   [ ] Tap "Adjust Stock":
+       - Type: Decrease
+       - Reason: Used
+       - Quantity: 10
+       - Notes: Used for morning sessions
+       - Tap Save
+   [ ] Quantity updates from 450 to 440
+   [ ] Tap "History" to see the adjustment log
+
+--------------------------------------------------------------
+6F. SUPPLIERS
+--------------------------------------------------------------
+More > Clinic Tools > Suppliers.
+
+   WHAT TO TEST:
+   [ ] Suppliers list loads
+   [ ] Tap + to add a supplier:
+       - Name: Medline Zambia Ltd
+       - Contact Person: Mr. Kamanga
+       - Phone: +260977200001
+       - Email: orders@medlinezambia.com
+       - Address: Cairo Road, Lusaka
+       - Tap Save
+   [ ] Supplier appears in the list
+   [ ] Tap supplier to view their detail page
+
+--------------------------------------------------------------
+6G. PAYMENTS
+--------------------------------------------------------------
+More > Clinic Tools > Finance > Payments.
+
+   WHAT TO TEST:
+   [ ] Payments list loads
+   [ ] Tap + to record a payment:
+       - Select an invoice (use the finalized one from 6D)
+       - Payment Method: Cash
+       - Amount: K 850.00
+       - Date: Today
+       - Reference: RCPT-001
+       - Tap Save
+   [ ] Payment appears in the list
+   [ ] Invoice status should update to "Paid"
+
+--------------------------------------------------------------
+6H. EXPENSES
+--------------------------------------------------------------
+More > Clinic Tools > Finance > Expenses.
+
+   WHAT TO TEST:
+   [ ] Expenses list loads
+   [ ] Tap + to log an expense:
+       - Title: Dialysis Consumables Restock
+       - Category: Medical Supplies
+       - Amount: K 3,200.00
+       - Date: Today
+       - Vendor: Medline Zambia Ltd
+       - Notes: Monthly consumables order
+       - Tap Save
+   [ ] Expense appears in the list
+   [ ] Tap expense to view full detail
+
+--------------------------------------------------------------
+6I. TREATMENT NOTES
+--------------------------------------------------------------
+Open a patient profile > Clinical tab > Treatment Notes.
+
+   WHAT TO TEST:
+   [ ] Tap + or "Add Note" to create a treatment note:
+       - Chief Complaint: Fatigue and swelling in lower limbs
+       - Diagnosis: Chronic Kidney Disease Stage 4
+       - Treatment: Haemodialysis 3x per week
+       - Medications: Erythropoietin 4000 IU, Ferrous Sulphate
+       - Notes: Patient tolerating dialysis well. UF target met.
+       - Tap Save
+   [ ] Note appears in the Clinical tab
+   [ ] Tap note to read the full entry
+
+--------------------------------------------------------------
+6J. REPORTS
+--------------------------------------------------------------
+More > Clinic Tools > Reports.
+
+   WHAT TO TEST:
+   [ ] Reports dashboard loads with charts/stats
+   [ ] Check figures for appointments, revenue, patients
+
+--------------------------------------------------------------
+6K. TELEHEALTH
+--------------------------------------------------------------
+More > Clinic Tools > Telehealth.
+
+   WHAT TO TEST:
+   [ ] Telehealth screen loads with list of sessions
+   [ ] Tap + to schedule a telehealth session:
+       - Select patient
+       - Select doctor
+       - Pick date and time
+       - Tap Save
+   [ ] Session appears in the list
+
+--------------------------------------------------------------
+6L. DEPARTMENTS
+--------------------------------------------------------------
+More > Clinic Tools > Departments.
+
+   WHAT TO TEST:
+   [ ] Departments list loads
+   [ ] Tap + to create a department:
+       - Name: Dialysis Unit
+       - Description: Manages all haemodialysis and
+         peritoneal dialysis services
+       - Tap Save
+   [ ] Department appears in the list
+   [ ] Tap the department to view members
+   [ ] Tap "Assign Staff" to add a staff member to it
+
+
+================================================================
+SECTION 7 — ADMINISTRATION (Admin Only)
+================================================================
+
+Back on the More screen, scroll to "Administration".
+This section is only visible when logged in as Admin.
+
+--------------------------------------------------------------
+7A. ADMIN PANEL
+--------------------------------------------------------------
+Tap "Admin Panel" to see all admin functions at a glance.
+
+--------------------------------------------------------------
+7B. STAFF MANAGEMENT
+--------------------------------------------------------------
+More > Administration > Staff Management.
+
+   WHAT TO TEST — VIEW STAFF:
+   [ ] Staff list loads showing all accounts
+   [ ] Tap any staff member to see their profile and credentials
+
+   WHAT TO TEST — ADD NEW STAFF:
+   [ ] Tap + or "Add Staff Member"
+   [ ] Fill in:
+       - Email: (use a REAL email you can access)
+         e.g. teststaff@gmail.com
+       - Role: Moderator
+   [ ] Tap "Create Account"
+   [ ] A strong password is generated automatically
+   [ ] Tap "Copy" to copy the password
+   [ ] Tap "Send via Email" — credentials are emailed to the
+       new staff member's email address
+   [ ] The new staff member logs in with their email, receives
+       an OTP, then uses the provided password
+   [ ] Tap "Done"
+
+--------------------------------------------------------------
+7C. DEVICE APPROVALS
+--------------------------------------------------------------
+More > Administration > Device Approvals.
+
+   WHAT TO TEST:
+   [ ] Pending device requests list loads
+   [ ] If any pending requests exist, tap to Approve or Deny
+
+--------------------------------------------------------------
+7D. ANNOUNCEMENTS
+--------------------------------------------------------------
+More > Administration > Send Announcement.
+
+   WHAT TO TEST:
+   [ ] Tap "Send Announcement":
+       - Title: Staff Meeting Reminder
+       - Message: Please note there is a mandatory staff meeting
+         on Friday 2nd May at 09:00am in the main boardroom.
+         Attendance is compulsory for all clinical staff.
+       - Tap Send
+   [ ] Announcement appears in the Channels > Announcements tab
+
+--------------------------------------------------------------
+7E. MANAGE CHANNELS
+--------------------------------------------------------------
+More > Administration > Manage Channels.
+
+   WHAT TO TEST:
+   [ ] List of all channels is shown
+   [ ] Tap + to create a new channel:
+       - Name: icu-team
+       - Display Name: ICU Team
+       - Description: ICU coordination and critical care updates
+       - Type: Public
+       - Tap Create
+   [ ] New channel appears in the Channels tab
+   [ ] Tap channel > Edit to rename or add members
+
+--------------------------------------------------------------
+7F. ANALYTICS
+--------------------------------------------------------------
+More > Administration > Analytics.
+
+   WHAT TO TEST:
+   [ ] Analytics dashboard loads with system-wide usage stats
+
+--------------------------------------------------------------
+7G. ACTIVITY LOGS
+--------------------------------------------------------------
+More > Administration > Activity Logs.
+
+   WHAT TO TEST:
+   [ ] Log entries appear showing recent system actions
+   [ ] Each entry shows timestamp, action, and who performed it
+
+
+================================================================
+SECTION 8 — YOUR PROFILE & SETTINGS
+================================================================
+
+Tap MORE > your name / profile picture at the top.
+
+   WHAT TO TEST:
+   [ ] Profile screen shows your name, role, and email
+   [ ] Tap "Edit Profile":
+       - Add a display name: e.g. "Admin"
+       - Add a title: e.g. "Dr"
+       - Tap Save
+   [ ] Changes reflect on the profile screen
+
+More > Settings:
+   [ ] Notification preferences are visible
+   [ ] App version is shown
+
+More > Privacy & Security:
+   [ ] Trusted Devices list shows your current device
+
+More > Trusted Devices:
+   [ ] Your logged-in device appears in the list
+
+More > Files:
+   [ ] Shared files appear:
+       - Standard Operating Procedures (folder)
+       - Training Materials (folder)
+       - Shift_Rota_March_2026.xlsx
+       - Dialysis_Protocol_v3.2.pdf
+       - Infection_Control_Guide.pdf
+   [ ] Tap a file to preview or open it
+
+
+================================================================
+SECTION 9 — STAFF DIRECTORY
+================================================================
+
+More > Staff Directory.
+
+   WHAT TO TEST:
+   [ ] All staff members are listed with name, role, department
+   [ ] Tap any staff member to see their profile:
+       - Name, role, department, bio, contact details
+       - Online / Away / Offline status indicator
+   [ ] Staff you should see:
+       - Dr. Sarah Mbewe (Dialysis)
+       - Nurse James Phiri (Dialysis)
+       - Dr. Chisanga Banda (General Medicine)
+       - Pharmacist Grace Mutale (Pharmacy)
+       - Nurse David Tembo (Night Shift)
+       - Nurse Ruth Chomba (ICU)
+
+
+================================================================
+SECTION 10 — LOGGING OUT
+================================================================
+
+More > scroll to bottom > "Sign Out" or "Log Out".
+
+   WHAT TO TEST:
+   [ ] Tap Log Out
+   [ ] App returns to the Welcome / Login screen
+   [ ] Log back in to confirm everything still works
+
+
+================================================================
+THINGS TO REPORT BACK
+================================================================
+
+Please take note of the following when testing and report back:
+
+1. Any screen that crashes or shows a red/white error page
+2. Any button that does nothing when tapped
+3. Any data that does not save after tapping Save
+4. Anything that looks visually broken (overlapping text,
+   missing buttons, images not loading)
+5. Any confusing wording or steps that are unclear
+6. Actions that work slowly or take too long to respond
+
+For each issue, please note:
+- Which screen you were on
+- What you tapped or did
+- What happened vs what you expected
+
+
+================================================================
+QUICK REFERENCE — TEST ACCOUNTS
+================================================================
+
+ADMIN (full access):
+  Email:    wilburhachita@gmail.com
+  Password: Michelle13//.
+
+OTHER SEEDED STAFF (for reference — use only if you can access
+their email inboxes for the OTP code):
+  sarah.mbewe@nichehealthcare.co.uk     | Password: Doctor123!
+  james.phiri@nichehealthcare.co.uk     | Password: Nurse123!
+  chisanga.banda@nichehealthcare.co.uk  | Password: Doctor456!
+  grace.mutale@nichehealthcare.co.uk    | Password: Pharma123!
+  david.tembo@nichehealthcare.co.uk     | Password: Nurse456!
+  ruth.chomba@nichehealthcare.co.uk     | Password: Nurse789!
+
+NOTE: These staff accounts use @nichehealthcare.co.uk emails.
+Unless those inboxes are real and accessible, you won't receive
+the OTP code. Stick to the admin account for testing.
+
+
+================================================================
+        Thank you for testing NHL Connect!
+        Niche Healthcare Limited
+================================================================

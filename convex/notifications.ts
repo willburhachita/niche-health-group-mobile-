@@ -250,7 +250,6 @@ export const sendOTPCode = action({
           categories: ["otp", "transactional", "authentication"],
           mail_settings: {
             bypass_list_management: { enable: true },
-            bypass_spam_management: { enable: true },
           },
           tracking_settings: {
             click_tracking: { enable: false },

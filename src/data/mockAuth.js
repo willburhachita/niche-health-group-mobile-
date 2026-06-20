@@ -60,7 +60,7 @@ export const PERMISSIONS = {
     editAppointment: true,
     deleteAppointment: false,
     createInvoice: true,
-    editInvoice: true,
+    editInvoice: false,
     deleteInvoice: false,
     createTreatmentNote: true,
     editTreatmentNote: true,

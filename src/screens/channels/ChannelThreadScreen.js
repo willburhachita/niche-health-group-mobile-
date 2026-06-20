@@ -47,12 +47,14 @@ export default function ChannelThreadScreen({ navigation, route }) {
   useFocusEffect(
     useCallback(() => {
       if (Platform.OS === 'android') {
-        NavigationBar.setBackgroundColorAsync(colors.white);
-        NavigationBar.setButtonStyleAsync('dark');
+        try {
+          NavigationBar.setBackgroundColorAsync(colors.white);
+          NavigationBar.setButtonStyleAsync('dark');
+        } catch (_) {}
       }
       return () => {
         if (Platform.OS === 'android') {
-          NavigationBar.setBackgroundColorAsync('transparent');
+          try { NavigationBar.setBackgroundColorAsync('transparent'); } catch (_) {}
         }
       };
     }, [])

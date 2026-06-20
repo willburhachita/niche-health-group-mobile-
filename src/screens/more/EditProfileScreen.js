@@ -6,19 +6,15 @@ import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { AppText } from '../../components/common/AppText';
 import { Avatar } from '../../components/common/Avatar';
-import { Button } from '../../components/common/Button';
 import { Input } from '../../components/common/Input';
-import { getCurrentUser } from '../../data/mockUsers';
 import { useAuth } from '../../hooks/useAuth';
 
 export default function EditProfileScreen({ navigation }) {
   const { currentAccount } = useAuth();
-  const mockUser = getCurrentUser();
-  const displayName = currentAccount?.displayName || mockUser.displayName;
-  // Parse surname/firstName from fullName ("Surname FirstName") or fall back to mockUser
+  const displayName = currentAccount?.displayName || currentAccount?.email || '';
   const nameParts = currentAccount?.fullName?.split(' ') || [];
-  const [firstName, setFirstName] = useState(nameParts[1] || mockUser.firstName);
-  const [lastName, setLastName] = useState(nameParts[0] || mockUser.lastName);
+  const [firstName, setFirstName] = useState(nameParts[1] || '');
+  const [lastName, setLastName] = useState(nameParts[0] || '');
   const [customStatus, setCustomStatus] = useState('');
 
   return (
@@ -42,9 +38,9 @@ export default function EditProfileScreen({ navigation }) {
         <Input label="First Name" value={firstName} onChangeText={setFirstName} placeholder="First name" />
         <Input label="Last Name" value={lastName} onChangeText={setLastName} placeholder="Last name" />
         <Input label="Custom Status" value={customStatus} onChangeText={setCustomStatus} placeholder="Set a status message..." icon="smile" />
-        <Input label="Email" value={currentAccount?.email || mockUser.email} editable={false} icon="mail" />
-        <Input label="Phone" value={currentAccount?.phone || mockUser.phone} editable={false} icon="phone" />
-        <Input label="Department" value={mockUser.department} editable={false} icon="briefcase" />
+        <Input label="Email" value={currentAccount?.email || ''} editable={false} icon="mail" />
+        <Input label="Phone" value={currentAccount?.phone || ''} editable={false} icon="phone" />
+        <Input label="Role" value={(currentAccount?.role || '').charAt(0).toUpperCase() + (currentAccount?.role || '').slice(1)} editable={false} icon="briefcase" />
       </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>

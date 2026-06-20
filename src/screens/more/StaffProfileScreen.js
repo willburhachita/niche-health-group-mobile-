@@ -10,25 +10,25 @@ import { AppText } from '../../components/common/AppText';
 import { Avatar } from '../../components/common/Avatar';
 import { Badge } from '../../components/common/Badge';
 import { Divider } from '../../components/common/Divider';
-import { getUserById } from '../../data/mockUsers';
+import { useQuery } from 'convex/react';
+import { api } from '../../../convex/_generated/api';
 
 export default function StaffProfileScreen({ navigation, route }) {
   const { userId } = route.params || {};
-  const user = getUserById(userId);
+  const user = useQuery(api.auth.getStaffByUserId, userId ? { userId } : 'skip');
   const insets = useSafeAreaInsets();
 
   if (!user) return null;
 
-  const roleDisplay = user.staffRole.charAt(0).toUpperCase() + user.staffRole.slice(1);
+  const roleDisplay = (user.role || 'member').charAt(0).toUpperCase() + (user.role || 'member').slice(1);
   const info = [
-    { icon: 'mail', label: 'Email', value: user.email },
-    { icon: 'phone', label: 'Phone', value: user.phone },
-    { icon: 'calendar', label: 'Joined', value: new Date(user.joinedAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) },
+    { icon: 'mail', label: 'Email', value: user.email || '—' },
+    { icon: 'phone', label: 'Phone', value: user.phone || '—' },
+    { icon: 'calendar', label: 'Joined', value: user.createdAt ? new Date(user.createdAt).toLocaleDateString(undefined, { month: 'long', year: 'numeric' }) : '—' },
   ];
 
-  const statusLabel = user.onlineStatus === 'online' ? 'Online' 
-    : user.onlineStatus === 'away' ? 'Away' 
-    : 'Offline';
+  const statusLabel = user.isActive !== false ? 'Active' : 'Inactive';
+  const statusVariant = user.isActive !== false ? 'success' : 'unread';
 
   return (
     <View style={styles.container}>
@@ -55,9 +55,9 @@ export default function StaffProfileScreen({ navigation, route }) {
             <Avatar name={user.displayName} size={110} showOnline onlineStatus={user.onlineStatus} style={styles.avatar} />
           </View>
           
-          <AppText variant="h1" style={styles.name}>{user.displayName}</AppText>
+          <AppText variant="h1" style={styles.name}>{user.displayName || user.fullName || user.email}</AppText>
           <AppText variant="body" color={colors.mediumGrey} style={styles.department}>
-            {roleDisplay} • {user.department}
+            {roleDisplay}
           </AppText>
 
           {user.bio ? (
@@ -67,8 +67,8 @@ export default function StaffProfileScreen({ navigation, route }) {
           ) : null}
 
           <View style={styles.badgeRow}>
-            <Badge label={statusLabel} variant={user.onlineStatus === 'online' ? 'success' : 'default'} />
-            <Badge label={user.department} variant="department" style={{ marginLeft: spacing.sm }} />
+            <Badge label={statusLabel} variant={statusVariant} style={user.isActive === false && { backgroundColor: '#EF4444' }} />
+            <Badge label={roleDisplay} variant="role" style={{ marginLeft: spacing.sm }} />
           </View>
 
           {/* Action Buttons */}

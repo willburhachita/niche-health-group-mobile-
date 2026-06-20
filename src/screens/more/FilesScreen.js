@@ -15,7 +15,6 @@ import { Divider } from '../../components/common/Divider';
 import { formatFileSize } from '../../utils/formatters';
 import { useAlert } from '../../components/common/CustomAlert';
 import { formatTimestamp } from '../../utils/dateHelpers';
-import { getUserById } from '../../data/mockUsers';
 
 const ICONS = { folder: 'folder', pdf: 'file-text', xlsx: 'file', doc: 'file-text', png: 'image', jpg: 'image' };
 const COLORS = { folder: colors.navyBlue, pdf: colors.error, xlsx: colors.success, doc: colors.navyBlue, png: colors.peach, jpg: colors.peach };
@@ -80,9 +79,8 @@ export default function FilesScreen({ navigation }) {
   // Build share targets: conversations + channels
   const shareTargets = [
     ...conversations.map(c => {
-      const other = c.members?.find(m => m !== currentUserId);
-      const user = getUserById(other);
-      return { id: c._id, name: c.type === 'group' ? c.name : (user?.displayName || 'Chat'), icon: c.type === 'group' ? 'users' : 'message-circle', type: 'chat' };
+      const otherMember = c.memberDetails?.find(m => m.id !== currentUserId);
+      return { id: c._id, name: c.type === 'group' ? (c.name || 'Group') : (otherMember?.displayName || 'Chat'), icon: c.type === 'group' ? 'users' : 'message-circle', type: 'chat' };
     }),
     ...channels.map(c => ({ id: c._id, name: c.displayName, icon: c.type === 'private' ? 'lock' : 'hash', type: 'channel' })),
   ];
@@ -103,7 +101,6 @@ export default function FilesScreen({ navigation }) {
         renderItem={({ item }) => {
           const icon = ICONS[item.fileType] || 'file';
           const iconColor = COLORS[item.fileType] || colors.mediumGrey;
-          const uploader = item.uploadedBy ? getUserById(item.uploadedBy) : null;
 
           return (
             <Pressable
@@ -120,7 +117,7 @@ export default function FilesScreen({ navigation }) {
                   <AppText variant="caption" color={colors.mediumGrey}>{item.itemCount} items</AppText>
                 ) : (
                   <AppText variant="caption" color={colors.mediumGrey}>
-                    {formatFileSize(item.size)}{uploader ? ` - ${uploader.displayName}` : ''} - {formatTimestamp(item.uploadedAt)}
+                    {formatFileSize(item.size)} · {formatTimestamp(item.uploadedAt)}
                   </AppText>
                 )}
               </View>

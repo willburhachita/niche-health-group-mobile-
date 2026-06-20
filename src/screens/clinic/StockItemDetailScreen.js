@@ -202,13 +202,38 @@ export default function StockItemDetailScreen({ route, navigation }) {
           ) : (
             adjustments.slice(0, 5).map(adj => {
               const isIncrease = adj.adjustmentType === 'increase';
+              const source = adj.source || 'manual';
+              const sourceLabelMap = { manual: 'Manual', invoice: 'Invoice', void: 'Voided' };
+              const sourceBgMap = {
+                manual:  colors.navyBlue + '14',
+                invoice: '#FF8C00' + '18',
+                void:    colors.error + '14',
+              };
+              const sourceColorMap = {
+                manual:  colors.navyBlue,
+                invoice: '#B45309',
+                void:    colors.error,
+              };
+              const sourceLabel = sourceLabelMap[source] || 'Manual';
+              const sourceBg = sourceBgMap[source] || sourceBgMap.manual;
+              const sourceColor = sourceColorMap[source] || sourceColorMap.manual;
               return (
                 <View key={adj._id} style={styles.adjRow}>
                   <View style={[styles.adjIcon, { backgroundColor: isIncrease ? colors.success + '14' : colors.error + '14' }]}>
                     <Feather name={isIncrease ? 'arrow-up' : 'arrow-down'} size={14} color={isIncrease ? colors.success : colors.error} />
                   </View>
                   <View style={{ flex: 1 }}>
-                    <AppText variant="body">{isIncrease ? '+' : '-'}{adj.quantity} · {adj.reason.replace(/_/g, ' ')}</AppText>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <AppText variant="body">{isIncrease ? '+' : '-'}{adj.quantity} · {adj.reason.replace(/_/g, ' ')}</AppText>
+                      <View style={[styles.sourceBadge, { backgroundColor: sourceBg }]}>
+                        <AppText variant="small" color={sourceColor} style={{ fontWeight: '600' }}>{sourceLabel}</AppText>
+                      </View>
+                    </View>
+                    {adj.invoiceNumber && (
+                      <AppText variant="small" color={colors.navyBlue} style={{ marginTop: 1 }}>
+                        📄 {adj.invoiceNumber}
+                      </AppText>
+                    )}
                     <AppText variant="small" color={colors.mediumGrey}>{adj.adjustedBy} · {formatTimestamp(adj.adjustedAt)}</AppText>
                   </View>
                   <AppText variant="caption" color={colors.darkGrey}>{adj.previousLevel} → {adj.newLevel}</AppText>
@@ -245,5 +270,6 @@ const styles = StyleSheet.create({
   expiryBanner: { flexDirection: 'row', alignItems: 'center', padding: spacing.md, borderRadius: radius.md },
   adjRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: spacing.sm },
   adjIcon: { width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center', marginRight: spacing.md },
+  sourceBadge: { paddingHorizontal: 6, paddingVertical: 1, borderRadius: 4 },
   actions: { paddingHorizontal: spacing.base, paddingVertical: spacing.lg },
 });

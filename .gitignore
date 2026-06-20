@@ -42,3 +42,12 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# local build outputs
+/releases/
+/apps/desktop/dist/
+/apps/desktop/release/
+/notes3/
+*.apk
+
+

@@ -65,6 +65,9 @@ export default function CreateEditSupplierScreen({ route, navigation }) {
   const [countrySearch, setCountrySearch] = useState('');
   const [email, setEmail] = useState(existing?.email || '');
   const [address, setAddress] = useState(existing?.address || '');
+  const [city, setCity] = useState(existing?.city || '');
+  const [region, setRegion] = useState(existing?.region || '');
+  const [country, setCountry] = useState(existing?.country || '');
   const [notes, setNotes] = useState(existing?.notes || '');
 
   const handleSave = async () => {
@@ -81,6 +84,9 @@ export default function CreateEditSupplierScreen({ route, navigation }) {
           phone: phone ? `${countryCode.code}${phone}` : undefined,
           email: email || undefined,
           address: address || undefined,
+          city: city || undefined,
+          region: region || undefined,
+          country: country || undefined,
           notes: notes || undefined,
         });
       } else {
@@ -90,6 +96,9 @@ export default function CreateEditSupplierScreen({ route, navigation }) {
           phone: phone ? `${countryCode.code}${phone}` : undefined,
           email: email || undefined,
           address: address || undefined,
+          city: city || undefined,
+          region: region || undefined,
+          country: country || undefined,
           notes: notes || undefined,
           createdBy: currentAccount?.userId || 'unknown',
         });
@@ -169,7 +178,10 @@ export default function CreateEditSupplierScreen({ route, navigation }) {
           </View>
         </Modal>
         <Input label="Email" value={email} onChangeText={setEmail} placeholder="orders@example.com" keyboardType="email-address" />
-        <Input label="Address" value={address} onChangeText={setAddress} placeholder="Street address, city" />
+        <Input label="Address" value={address} onChangeText={setAddress} placeholder="Street address" />
+        <Input label="City / Town" value={city} onChangeText={setCity} placeholder="e.g. Lusaka" />
+        <Input label="Region / Province" value={region} onChangeText={setRegion} placeholder="e.g. Lusaka Province" />
+        <Input label="Country" value={country} onChangeText={setCountry} placeholder="e.g. Zambia" />
         <Input label="Notes" value={notes} onChangeText={setNotes} placeholder="Delivery terms, minimum orders..." multiline />
 
         <View style={{ marginTop: spacing.xl }}>

@@ -19,6 +19,7 @@ export default defineSchema({
     trustedDevices: v.array(v.string()),
     createdBy: v.string(),
     createdAt: v.number(),
+    permissions: v.optional(v.array(v.string())), // custom granular permission overrides
   }).index("by_email", ["email"])
     .index("by_userId", ["userId"]),
 
@@ -107,7 +108,9 @@ export default defineSchema({
     uploadedAt: v.optional(v.number()),
     storageId: v.optional(v.string()), // Convex storage ID for actual files
     parentFolderId: v.optional(v.id("files")),
-  }),
+    patientId: v.optional(v.id("patients")),
+    category: v.optional(v.string()), // "Labs" | "Other Investigations" | "Other"
+  }).index("by_patientId", ["patientId"]),
 
   // ── Announcements ────────────────────────────────────────────────────
   announcements: defineTable({
@@ -175,20 +178,48 @@ export default defineSchema({
     gender: v.string(),               // "Male" | "Female" | "Other"
     phone: v.string(),
     email: v.optional(v.string()),
+    address: v.optional(v.string()),          // home address
+    nrcNumber: v.optional(v.string()),         // National Registration Card
+    occupation: v.optional(v.string()),
+    employer: v.optional(v.string()),
+    profileImageUrl: v.optional(v.string()),   // uploaded patient photo
     allergies: v.array(v.string()),
     conditions: v.array(v.string()),
     medications: v.array(v.string()),
     bloodType: v.optional(v.string()),
     insuranceProvider: v.optional(v.string()),
     policyNumber: v.optional(v.string()),
+    otherInsuranceProviders: v.optional(v.array(v.object({
+      provider: v.string(),
+      policyNumber: v.optional(v.string()),
+    }))),
     emergencyContactName: v.optional(v.string()),
     emergencyContactPhone: v.optional(v.string()),
     emergencyContactRelationship: v.optional(v.string()),
+    phoneCountryCode: v.optional(v.string()),     // "+260"
+    nhimaMemberNo: v.optional(v.string()),
+    nhimaScheme: v.optional(v.string()),
+    nhimaEmployer: v.optional(v.string()),
+    bankName: v.optional(v.string()),
+    bankAccountName: v.optional(v.string()),
+    bankAccountNumber: v.optional(v.string()),
+    bankBranchCode: v.optional(v.string()),
+    consentAcceptedAt: v.optional(v.number()),
+    consentPreferences: v.optional(v.object({
+      sms: v.boolean(),
+      email: v.boolean(),
+      phone: v.boolean(),
+    })),
     status: v.string(),               // "active" | "discharged" | "inactive"
     department: v.string(),           // "General" | "Dialysis" | "ICU" etc
     lastVisit: v.optional(v.number()),
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
+    archiveReason: v.optional(v.string()),
     createdBy: v.string(),
     createdAt: v.number(),
+    medicalAlerts: v.optional(v.array(v.string())),
   }).index("by_patientCode", ["patientCode"])
     .index("by_status", ["status"])
     .index("by_lastName", ["lastName"])
@@ -199,6 +230,7 @@ export default defineSchema({
     patientId: v.optional(v.id("patients")), // null for "open" slots
     providerId: v.string(),           // staff userId
     type: v.optional(v.string()),     // "Consultation" | "Follow-up" | "Dialysis Session" etc
+    serviceTypeId: v.optional(v.id("serviceTypes")), // linked service type
     startTime: v.number(),
     endTime: v.number(),
     duration: v.number(),             // minutes
@@ -209,7 +241,16 @@ export default defineSchema({
     recurringPattern: v.optional(v.string()), // "daily" | "weekly" | "biweekly" | "monthly"
     recurringEndDate: v.optional(v.number()),
     parentAppointmentId: v.optional(v.id("appointments")), // for recurrence instances
+    recurringInterval: v.optional(v.number()),
+    recurringOccurrences: v.optional(v.number()),
+    cancelReason: v.optional(v.string()),
+    cancelNotes: v.optional(v.string()),
     reminderSent: v.boolean(),
+    reasonForVisit: v.optional(v.string()),
+    recurringDays: v.optional(v.array(v.number())),
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_startTime", ["startTime"])
@@ -253,7 +294,16 @@ export default defineSchema({
     reorderLevel: v.number(),
     expiryDate: v.optional(v.number()),
     notes: v.optional(v.string()),
+    stockNotes: v.optional(v.array(v.object({
+      text: v.string(),
+      author: v.string(),
+      timestamp: v.number(),
+    }))),
     status: v.string(),               // "active" | "discontinued"
+    alertOnLow: v.optional(v.boolean()),           // default true — notify when below reorder
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
     createdBy: v.string(),
     updatedBy: v.optional(v.string()),
     createdAt: v.number(),
@@ -273,6 +323,10 @@ export default defineSchema({
     notes: v.optional(v.string()),
     adjustedBy: v.string(),
     adjustedAt: v.number(),
+    // Source tracking
+    source: v.optional(v.string()),             // "manual" | "invoice" | "void"
+    invoiceId: v.optional(v.id("invoices")),    // set when triggered by an invoice
+    invoiceNumber: v.optional(v.string()),       // denormalised for display without extra lookup
   }).index("by_stockItemId", ["stockItemId"])
     .index("by_adjustedAt", ["adjustedAt"]),
 
@@ -283,10 +337,16 @@ export default defineSchema({
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
     address: v.optional(v.string()),
+    city: v.optional(v.string()),              // city / town
+    region: v.optional(v.string()),            // province / region
+    country: v.optional(v.string()),
     notes: v.optional(v.string()),
     isFrequent: v.boolean(),
     orderCount: v.number(),
     lastOrderDate: v.optional(v.number()),
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -304,8 +364,28 @@ export default defineSchema({
     total: v.number(),
     status: v.string(),               // "unpaid" | "paid" | "overdue" | "partial"
     notes: v.optional(v.string()),
+    paidAt: v.optional(v.number()),
+    paidBy: v.optional(v.string()),
+    paidAmount: v.optional(v.number()),            // total paid so far (for partial)
+    submitToNhimaAt: v.optional(v.number()),
+    nhimaClaimNumber: v.optional(v.string()),
+    nhimaStatus: v.optional(v.string()),           // "pending" | "submitted" | "approved" | "rejected"
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
+    businessName: v.optional(v.string()),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          fileType: v.string(),
+          size: v.number(),
+          storageId: v.string(),
+        })
+      )
+    ),
   }).index("by_patientId", ["patientId"])
     .index("by_status", ["status"])
     .index("by_date", ["date"])
@@ -348,15 +428,28 @@ export default defineSchema({
     paymentMethod: v.optional(v.string()),
     referenceNumber: v.optional(v.string()),
     notes: v.optional(v.string()),
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
     createdBy: v.string(),
     createdAt: v.number(),
     updatedAt: v.number(),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          fileType: v.string(),
+          size: v.number(),
+          storageId: v.string(),
+        })
+      )
+    ),
   }).index("by_category", ["category"])
     .index("by_date", ["date"]),
 
   // ── Telehealth Sessions ──────────────────────────────────────────────
   telehealthSessions: defineTable({
-    appointmentId: v.id("appointments"),
+    appointmentId: v.optional(v.id("appointments")),
     patientId: v.id("patients"),
     providerId: v.string(),           // staff userId (doctor)
     status: v.string(),               // "waiting" | "active" | "completed" | "missed"
@@ -366,6 +459,14 @@ export default defineSchema({
     callNotes: v.optional(v.string()),
     transcription: v.optional(v.string()),
     treatmentNoteId: v.optional(v.id("treatmentNotes")),
+    roomUrl: v.optional(v.string()),  // Jitsi Meet room URL
+    platform: v.optional(v.string()), // "jitsi" | "zoom" | "google_meet"
+    invitees: v.optional(v.array(v.string())), // userId/email list invited to join
+    participants: v.optional(v.array(v.object({
+      userId: v.string(),
+      displayName: v.string(),
+      joinedAt: v.number(),
+    }))), // real-time list of who has joined
     createdBy: v.string(),
     createdAt: v.number(),
   }).index("by_appointmentId", ["appointmentId"])
@@ -388,6 +489,7 @@ export default defineSchema({
     providerId: v.string(),           // staff userId
     appointmentId: v.optional(v.id("appointments")),
     template: v.string(),             // "General Consultation" | "Dialysis Session" | "Follow-up" | "Custom"
+    templateId: v.optional(v.id("treatmentNoteTemplates")),
     subjective: v.optional(v.string()),
     objective: v.optional(v.string()),
     assessment: v.optional(v.string()),
@@ -399,10 +501,259 @@ export default defineSchema({
       weight: v.optional(v.number()),
       o2Sat: v.optional(v.number()),
     })),
+    customResponses: v.optional(v.array(v.object({
+      questionId: v.string(),
+      questionTitle: v.string(),
+      value: v.string(),
+    }))),
     isPrivate: v.boolean(),
+    status: v.optional(v.string()), // "draft" | "finalized" | "approved"
+    approvedBy: v.optional(v.string()), // staff admin email
+    approvedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   }).index("by_patientId", ["patientId"])
     .index("by_providerId", ["providerId"])
     .index("by_createdAt", ["createdAt"]),
+
+  // ── Treatment Note Templates ──────────────────────────────────────────
+  treatmentNoteTemplates: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    sections: v.array(v.object({
+      title: v.string(),
+      questions: v.array(v.object({
+        id: v.string(),
+        title: v.string(),
+        type: v.string(),
+        options: v.optional(v.array(v.string())),
+      })),
+    })),
+    printSettings: v.object({
+      title: v.optional(v.string()),
+      showLogo: v.boolean(),
+      showPatientAddress: v.boolean(),
+      showPatientDob: v.boolean(),
+      showPatientNhima: v.boolean(),
+      showPatientReference: v.boolean(),
+      showPatientOccupation: v.boolean(),
+    }),
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }),
+
+  // ── In-App Notifications ──────────────────────────────────────────────
+  inAppNotifications: defineTable({
+    userId: v.string(),               // recipient staff userId / email
+    type: v.string(),                 // "appointment" | "invoice" | "stock" | "telehealth" | "message" | "announcement" | "system"
+    title: v.string(),
+    body: v.optional(v.string()),
+    link: v.optional(v.string()),     // route to navigate to on click
+    entityId: v.optional(v.string()), // optional related record ID
+    isRead: v.boolean(),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"])
+    .index("by_userId_and_isRead", ["userId", "isRead"])
+    .index("by_createdAt", ["createdAt"]),
+
+  // ── Time Entries (Login/Logout Tracking) ────────────────────────────
+  timeEntries: defineTable({
+    userId: v.string(),               // staff email
+    clockIn: v.number(),              // timestamp
+    clockOut: v.optional(v.number()), // timestamp (null = still clocked in)
+    totalMinutes: v.optional(v.number()),
+    notes: v.optional(v.string()),
+  }).index("by_userId", ["userId"])
+    .index("by_clockIn", ["clockIn"]),
+
+  // ── Shifts / Duty Roster (MyDuty feature) ───────────────────────────
+  shifts: defineTable({
+    userId: v.string(),               // staff email
+    date: v.string(),                 // "2026-05-04"
+    shiftType: v.string(),            // "Morning" | "Afternoon" | "Night" | "Off" | custom
+    color: v.string(),                // hex color code for calendar display
+    startTime: v.optional(v.string()), // "07:00"
+    endTime: v.optional(v.string()),   // "15:00"
+    notes: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"])
+    .index("by_date", ["date"])
+    .index("by_userId_and_date", ["userId", "date"]),
+
+  // ── Shift Types ─────────────────────────────────────────────────────
+  shiftTypes: defineTable({
+    name: v.string(),                 // "Morning" | "Afternoon" | "Night" | "Off"
+    color: v.string(),                // hex e.g. "#4CAF50"
+    startTime: v.optional(v.string()), // default start
+    endTime: v.optional(v.string()),   // default end
+    createdBy: v.string(),
+  }),
+
+  // ══════════════════════════════════════════════════════════════════════
+  // ── SERVICE CATALOG & CONFIGURATION ─────────────────────────────────
+  // ══════════════════════════════════════════════════════════════════════
+
+  // ── Service Types (appointment types / billable services) ──────────
+  serviceTypes: defineTable({
+    name: v.string(),                 // "General Consultation", "Dialysis Session", etc.
+    description: v.optional(v.string()),
+    fixedPrice: v.number(),           // the price charged to the patient
+    duration: v.optional(v.number()), // default appointment duration in minutes
+    stockItems: v.array(v.object({    // items consumed when this service is performed
+      stockItemId: v.id("stockItems"),
+      quantity: v.number(),
+    })),
+    treatmentTemplate: v.optional(v.string()), // template name for treatment notes
+    isActive: v.boolean(),
+    isArchived: v.optional(v.boolean()),
+    archivedBy: v.optional(v.string()),
+    archivedAt: v.optional(v.number()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).searchIndex("search_name", { searchField: "name" }),
+
+  // ── Billable Items (misc chargeable items beyond services) ─────────
+  billableItems: defineTable({
+    name: v.string(),
+    description: v.optional(v.string()),
+    unitPrice: v.number(),
+    taxable: v.boolean(),
+    category: v.optional(v.string()),  // "lab_test" | "procedure" | "consumable" | "other"
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }).searchIndex("search_name", { searchField: "name" }),
+
+  // ── Tax Configurations ─────────────────────────────────────────────
+  taxConfigs: defineTable({
+    name: v.string(),                 // "VAT 16%", "Zero Rated", "Exempt"
+    rate: v.number(),                 // 0.16, 0, etc.
+    isDefault: v.boolean(),
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }),
+
+  // ── Payment Types ──────────────────────────────────────────────────
+  paymentTypes: defineTable({
+    name: v.string(),                 // "Cash", "Mobile Money", "Card", "NHIMA", "Bank Transfer"
+    description: v.optional(v.string()),
+    requiresReference: v.boolean(),   // whether reference number is mandatory
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }),
+
+  // ── Recall Types (patient follow-up reminders) ─────────────────────
+  recallTypes: defineTable({
+    name: v.string(),                 // "6-Month Check-up", "Annual Physical", "Post-Op Follow-up"
+    description: v.optional(v.string()),
+    defaultDays: v.number(),          // days after last visit to trigger recall
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }),
+
+  // ── Clinic Configuration (single-row settings) ─────────────────────
+  clinicConfig: defineTable({
+    key: v.string(),                  // config key
+    value: v.string(),                // JSON-encoded value
+    updatedBy: v.string(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
+
+  // ── Staff Salary Config (Payroll settings per employee) ────────────
+  staffSalaryConfig: defineTable({
+    userId: v.string(),               // staff email
+    baseSalary: v.number(),           // monthly base pay
+    allowances: v.number(),           // total allowances (transport, housing)
+    napsaRate: v.number(),            // Pension rate e.g. 0.05
+    nhimaRate: v.number(),            // Medical rate e.g. 0.01
+    bankName: v.optional(v.string()),
+    bankAccountNumber: v.optional(v.string()),
+    bankBranchCode: v.optional(v.string()),
+    isActive: v.boolean(),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"])
+    .index("by_isActive", ["isActive"]),
+
+  // ── Payroll Records (processed payroll pay slips) ──────────────────
+  payrollRecords: defineTable({
+    userId: v.string(),               // staff email
+    period: v.string(),               // "2026-05" (year-month)
+    baseSalary: v.number(),
+    allowances: v.number(),
+    grossPay: v.number(),
+    napsaDeduction: v.number(),
+    nhimaDeduction: v.number(),
+    payeDeduction: v.number(),
+    netPay: v.number(),
+    hoursWorked: v.number(),
+    status: v.string(),               // "draft" | "approved" | "paid"
+    paidAt: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    createdBy: v.string(),
+    createdAt: v.number(),
+  }).index("by_userId", ["userId"])
+    .index("by_period", ["period"])
+    .index("by_status", ["status"]),
+
+  // ── Patient Forms ─────────────────────────────────────────────────────
+  patientForms: defineTable({
+    patientId: v.id("patients"),
+    title: v.string(),
+    status: v.string(), // "draft" | "submitted"
+    responses: v.string(), // JSON string representing responses
+    submittedBy: v.string(), // staff email
+    submittedAt: v.number(),
+  }).index("by_patientId", ["patientId"]),
+
+  // ── Patient Letters ───────────────────────────────────────────────────
+  patientLetters: defineTable({
+    patientId: v.id("patients"),
+    recipient: v.string(),
+    subject: v.string(),
+    body: v.string(),
+    status: v.string(), // "draft" | "sent"
+    sentBy: v.string(), // staff email
+    sentAt: v.number(),
+  }).index("by_patientId", ["patientId"]),
+
+  // ── Patient Cases ─────────────────────────────────────────────────────
+  patientCases: defineTable({
+    patientId: v.id("patients"),
+    title: v.string(),
+    description: v.optional(v.string()),
+    status: v.string(), // "open" | "closed"
+    openedBy: v.string(), // staff email
+    openedAt: v.number(),
+    closedAt: v.optional(v.number()),
+  }).index("by_patientId", ["patientId"]),
+
+  // ── Patient Recalls ───────────────────────────────────────────────────
+  patientRecalls: defineTable({
+    patientId: v.id("patients"),
+    recallType: v.string(),
+    dueDate: v.number(),
+    status: v.string(), // "pending" | "completed" | "cancelled"
+    notes: v.optional(v.string()),
+    scheduledBy: v.string(), // staff email
+    scheduledAt: v.number(),
+  }).index("by_patientId", ["patientId"]),
+
+  // ── Patient Communications ────────────────────────────────────────────
+  patientCommunications: defineTable({
+    patientId: v.id("patients"),
+    type: v.string(), // "SMS" | "Email" | "Phone Call" | "Letter"
+    direction: v.string(), // "inbound" | "outbound"
+    subject: v.optional(v.string()),
+    message: v.string(),
+    status: v.string(), // "sent" | "delivered" | "failed" | "logged"
+    sentBy: v.string(), // staff email
+    sentAt: v.number(),
+  }).index("by_patientId", ["patientId"]),
 });

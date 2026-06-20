@@ -7,9 +7,10 @@ import {
   hasPermission as checkPermission,
   generateDeviceId,
   TITLE_OPTIONS,
-} from '../data/mockAuth';
+} from '../utils/authHelpers';
 
 const SESSION_KEY = '@niche_auth_session';
+const DEVICE_ID_KEY = '@niche_device_id';
 
 const AuthContext = createContext({
   isAuthenticated: false,
@@ -28,13 +29,17 @@ const AuthContext = createContext({
   retryDeviceCheck: () => {},
 });
 
-// Persistent device ID (in production, stored in SecureStore)
-let _deviceId = null;
-function getOrCreateDeviceId() {
-  if (!_deviceId) {
-    _deviceId = generateDeviceId();
+// Get or create a persistent device ID stored in AsyncStorage
+async function getOrCreatePersistentDeviceId() {
+  try {
+    const stored = await AsyncStorage.getItem(DEVICE_ID_KEY);
+    if (stored) return stored;
+    const newId = generateDeviceId();
+    await AsyncStorage.setItem(DEVICE_ID_KEY, newId);
+    return newId;
+  } catch {
+    return generateDeviceId(); // fallback if AsyncStorage fails
   }
-  return _deviceId;
 }
 
 export function AuthProvider({ children }) {
@@ -44,16 +49,21 @@ export function AuthProvider({ children }) {
   const [needsOnboarding, setNeedsOnboarding] = useState(false);
   const [isDevicePending, setIsDevicePending] = useState(false);
   const [currentAccount, setCurrentAccount] = useState(null);
-  const [deviceId] = useState(getOrCreateDeviceId);
+  const [deviceId, setDeviceId] = useState(null);
 
   // Helper: check if profile is incomplete
   const isProfileIncomplete = (account) =>
     !account.isOnboarded || !account.fullName || !account.phone || !account.title;
 
-  // Restore session from AsyncStorage on app start
+  // Load persistent device ID + restore session on app start
   useEffect(() => {
     (async () => {
       try {
+        // 1. Get or create a persistent device ID
+        const persistedDeviceId = await getOrCreatePersistentDeviceId();
+        setDeviceId(persistedDeviceId);
+
+        // 2. Restore auth session
         const stored = await AsyncStorage.getItem(SESSION_KEY);
         if (stored) {
           const { email } = JSON.parse(stored);
@@ -85,7 +95,10 @@ export function AuthProvider({ children }) {
     setIsLoading(true);
     setCurrentAccount(account);
 
-    const trusted = account.trustedDevices?.includes(deviceId) || false;
+    // deviceId may still be loading on first render — re-read from storage as fallback
+    const activeDeviceId = deviceId || await getOrCreatePersistentDeviceId();
+
+    const trusted = account.trustedDevices?.includes(activeDeviceId) || false;
     const profileIncomplete = isProfileIncomplete(account);
 
     if (trusted) {
@@ -109,9 +122,9 @@ export function AuthProvider({ children }) {
       // Untrusted device — request admin approval
       convex.mutation(api.auth.createDeviceRequest, {
         staffId: String(account._id),
-        deviceId,
-        deviceName: 'New Device',
-        platform: 'Unknown',
+        deviceId: activeDeviceId,
+        deviceName: 'Mobile Device',
+        platform: 'Android/iOS',
       });
       setIsDevicePending(true);
       setNeedsOnboarding(false);

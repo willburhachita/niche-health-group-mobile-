@@ -1,664 +1,588 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Pressable, Modal, ScrollView, TextInput, KeyboardAvoidingView, Platform, Animated, StyleSheet } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import {
+  View, Pressable, StyleSheet, StatusBar,
+  Modal, Platform, ActivityIndicator, Linking, TextInput, Switch, ScrollView,
+} from 'react-native';
+import { WebView } from 'react-native-webview';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { radius } from '../../constants/radius';
-import { typography } from '../../constants/typography';
 import { AppText } from '../../components/common/AppText';
 import { Avatar } from '../../components/common/Avatar';
 import { Button } from '../../components/common/Button';
-import { Divider } from '../../components/common/Divider';
 import { useQuery, useMutation } from 'convex/react';
 import { api } from '../../../convex/_generated/api';
 import { useAuth } from '../../hooks/useAuth';
 
+const MAX_DURATION = 3600; // 1-hour hard cap
+
 export default function TelehealthCallScreen({ route, navigation }) {
-  const { appointmentId, sessionId: existingSessionId } = route.params || {};
-  const { currentUserId } = useAuth();
+  const {
+    appointmentId,
+    sessionId: routeSessionId,
+    patientId: routePatientId,
+  } = route.params || {};
 
-  const appointment = useQuery(api.appointments.get, appointmentId ? { id: appointmentId } : 'skip');
-  const patient = useQuery(api.patients.get, appointment?.patientId ? { id: appointment.patientId } : 'skip');
-  const existingSession = useQuery(api.telehealth.getByAppointment, appointmentId ? { appointmentId } : 'skip');
+  const { currentUserId, currentAccount } = useAuth();
 
-  const startSession = useMutation(api.telehealth.startSession);
-  const endSessionMut = useMutation(api.telehealth.endSession);
-  const updateNotesMut = useMutation(api.telehealth.updateNotes);
-  const updateTranscriptionMut = useMutation(api.telehealth.updateTranscription);
+  // ── Convex queries ─────────────────────────────────────────────────────
+  const appointment  = useQuery(api.appointments.get, appointmentId ? { id: appointmentId } : 'skip');
+  const effectivePid = appointment?.patientId || routePatientId;
+  const patient      = useQuery(api.patients.get, effectivePid ? { id: effectivePid } : 'skip');
+  const existingSession = useQuery(
+    api.telehealth.getByAppointment,
+    appointmentId ? { appointmentId } : 'skip'
+  );
+  // Live session (for participants + roomUrl when session already created)
+  const [activeSessionId, setActiveSessionId] = useState(routeSessionId || null);
+  const liveSession = useQuery(
+    api.telehealth.get,
+    activeSessionId ? { id: activeSessionId } : 'skip'
+  );
 
-  const [sessionId, setSessionId] = useState(existingSessionId || null);
-  const [isMuted, setIsMuted] = useState(false);
-  const [isCameraOn, setIsCameraOn] = useState(true);
-  const [isSpeakerOn, setIsSpeakerOn] = useState(true);
-  const [elapsed, setElapsed] = useState(0);
-  const [showNotes, setShowNotes] = useState(false);
-  const [showEndConfirm, setShowEndConfirm] = useState(false);
-  const [callNotes, setCallNotes] = useState('');
-  const [transcription, setTranscription] = useState('');
-  const [isRecording, setIsRecording] = useState(false);
-  const [callEnded, setCallEnded] = useState(false);
-  const [createNoteOnEnd, setCreateNoteOnEnd] = useState(true);
+  // ── Mutations ──────────────────────────────────────────────────────────
+  const startSessionMut = useMutation(api.telehealth.startSession);
+  const endSessionMut   = useMutation(api.telehealth.endSession);
+  const joinSessionMut  = useMutation(api.telehealth.joinSession);
+  const leaveSessionMut = useMutation(api.telehealth.leaveSession);
 
-  const pulseAnim = useRef(new Animated.Value(1)).current;
-  const startTimeRef = useRef(null);
-  const notesDebounceRef = useRef(null);
+  // ── Local state ────────────────────────────────────────────────────────
+  const [roomUrl, setRoomUrl]               = useState(null);
+  const [elapsed, setElapsed]               = useState(0);
+  const [showTimeWarning, setShowTimeWarning] = useState(false);
+  const [showEndConfirm, setShowEndConfirm]  = useState(false);
+  const [showParticipants, setShowParticipants] = useState(false);
+  const [callEnded, setCallEnded]            = useState(false);
+  const [webviewLoading, setWebviewLoading]  = useState(true);
+  const [callNotes, setCallNotes]            = useState('');
+  const [createTreatmentNote, setCreateTreatmentNote] = useState(true);
   const initRef = useRef(false);
 
-  // Stable IDs for deps (avoid object reference changes from Convex queries)
-  const patientIdFromApt = appointment?.patientId;
-  const queriedSessionId = existingSession?._id;
-  const queriedSessionStatus = existingSession?.status;
+  // ── Live participants from Convex ──────────────────────────────────────
+  const participants = liveSession?.participants || [];
 
-  // Initialize session on mount
+  // ── Session initialisation ─────────────────────────────────────────────
   useEffect(() => {
     if (initRef.current) return;
-    if (!patientIdFromApt || !currentUserId) return;
-    if (sessionId) { initRef.current = true; return; }
 
-    // Check if there's an existing active session
-    if (queriedSessionId && (queriedSessionStatus === 'active' || queriedSessionStatus === 'waiting')) {
+    // Case 1: sessionId passed directly (instant session already created)
+    if (routeSessionId) {
+      if (liveSession === undefined) return; // still loading
       initRef.current = true;
-      setSessionId(queriedSessionId);
-      if (existingSession?.callNotes) setCallNotes(existingSession.callNotes);
-      if (existingSession?.transcription) setTranscription(existingSession.transcription);
-      if (existingSession?.startedAt) {
-        startTimeRef.current = existingSession.startedAt;
-        setElapsed(Math.round((Date.now() - existingSession.startedAt) / 1000));
+      if (liveSession?.roomUrl) {
+        setRoomUrl(liveSession.roomUrl);
+        if (liveSession.startedAt) {
+          setElapsed(Math.round((Date.now() - liveSession.startedAt) / 1000));
+        }
       }
+      _join(routeSessionId);
       return;
     }
 
-    // existingSession query still loading (undefined) — wait
-    if (existingSession === undefined) return;
+    // Case 2: appointment-linked session
+    if (!effectivePid || !currentUserId) return;
+    if (appointmentId && existingSession === undefined) return;
 
-    // No active session found — start a new one
+    if (existingSession?.status === 'active' && existingSession?.roomUrl) {
+      initRef.current = true;
+      setActiveSessionId(existingSession._id);
+      setRoomUrl(existingSession.roomUrl);
+      if (existingSession.startedAt) {
+        setElapsed(Math.round((Date.now() - existingSession.startedAt) / 1000));
+      }
+      _join(existingSession._id);
+      return;
+    }
+
+    // No existing session — start one
+    if (existingSession !== null && existingSession !== undefined) return; // already handled
     initRef.current = true;
-    startSession({
+    startSessionMut({
       appointmentId,
-      patientId: patientIdFromApt,
+      patientId: effectivePid,
       providerId: currentUserId,
       createdBy: currentUserId,
-    }).then(id => {
-      setSessionId(id);
-      startTimeRef.current = Date.now();
+    }).then(result => {
+      const id  = result?.sessionId ?? result;
+      const url = result?.roomUrl;
+      setActiveSessionId(id);
+      if (url) setRoomUrl(url);
+      _join(id);
     });
-  }, [patientIdFromApt, currentUserId, queriedSessionId, queriedSessionStatus]);
+  }, [effectivePid, currentUserId, existingSession, liveSession, routeSessionId]);
 
-  // Timer
+  // Update roomUrl from live session when it arrives
   useEffect(() => {
-    if (callEnded) return;
+    if (liveSession?.roomUrl && !roomUrl) {
+      setRoomUrl(liveSession.roomUrl);
+    }
+  }, [liveSession?.roomUrl]);
+
+  const _join = (sid) => {
+    if (!sid || !currentUserId || !currentAccount?.displayName) return;
+    joinSessionMut({
+      sessionId: sid,
+      userId: currentUserId,
+      displayName: currentAccount.displayName,
+    });
+  };
+
+  // ── 1-hour timer ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (callEnded || !roomUrl) return;
     const interval = setInterval(() => {
-      setElapsed(prev => prev + 1);
+      setElapsed(prev => {
+        const next = prev + 1;
+        if (next === MAX_DURATION - 300) setShowTimeWarning(true);
+        if (next >= MAX_DURATION) {
+          clearInterval(interval);
+          setShowEndConfirm(true);
+        }
+        return next;
+      });
     }, 1000);
     return () => clearInterval(interval);
-  }, [callEnded]);
+  }, [callEnded, roomUrl]);
 
-  // Pulse animation for recording indicator
-  useEffect(() => {
-    if (!isRecording) return;
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnim, { toValue: 0.3, duration: 800, useNativeDriver: true }),
-        Animated.timing(pulseAnim, { toValue: 1, duration: 800, useNativeDriver: true }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [isRecording]);
-
-  // Auto-save notes to backend (debounced)
-  const saveNotes = useCallback((text) => {
-    if (!sessionId) return;
-    if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
-    notesDebounceRef.current = setTimeout(() => {
-      updateNotesMut({ sessionId, callNotes: text });
-    }, 1500);
-  }, [sessionId]);
-
-  const handleNotesChange = (text) => {
-    setCallNotes(text);
-    saveNotes(text);
+  // ── Helpers ────────────────────────────────────────────────────────────
+  const formatDuration = (s) => {
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60).toString().padStart(2, '0');
+    const sec = (s % 60).toString().padStart(2, '0');
+    return h > 0 ? `${h}:${m}:${sec}` : `${m}:${sec}`;
   };
 
-  const formatDuration = (seconds) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-    const s = (seconds % 60).toString().padStart(2, '0');
-    return h > 0 ? `${h}:${m}:${s}` : `${m}:${s}`;
-  };
-
-  // Toggle simulated transcription recording
-  const toggleRecording = () => {
-    if (isRecording) {
-      setIsRecording(false);
-      // Save accumulated transcription
-      if (sessionId && transcription) {
-        updateTranscriptionMut({ sessionId, transcription });
-      }
-    } else {
-      setIsRecording(true);
-    }
-  };
-
-  // End call flow
   const handleEndCall = async () => {
-    setShowEndConfirm(false);
     setCallEnded(true);
-
-    if (sessionId) {
-      await endSessionMut({
-        sessionId,
-        callNotes: callNotes || undefined,
-        transcription: transcription || undefined,
-        createTreatmentNote: createNoteOnEnd,
-      });
+    setShowEndConfirm(false);
+    const sid = activeSessionId || routeSessionId;
+    if (sid) {
+      if (currentUserId) {
+        try { await leaveSessionMut({ sessionId: sid, userId: currentUserId }); } catch {}
+      }
+      try {
+        await endSessionMut({
+          sessionId: sid,
+          callNotes: callNotes.trim() ? callNotes : undefined,
+          createTreatmentNote,
+        });
+      } catch {}
     }
-
     navigation.goBack();
   };
 
-  // Appointment info
-  const aptType = appointment?.type || 'Telehealth';
-  const aptTime = appointment?.startTime
-    ? new Date(appointment.startTime).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-    : '';
+  // Build Jitsi URL with inline config so no auth/lobby is needed
+  const buildJitsiUrl = (url) => {
+    if (!url) return null;
+    const name = encodeURIComponent(currentAccount?.displayName || 'Provider');
+    const cfg = [
+      'config.prejoinPageEnabled=false',
+      'config.startWithAudioMuted=false',
+      'config.startWithVideoMuted=false',
+      'config.disableDeepLinking=true',
+      'config.enableWelcomePage=false',
+      'config.enableClosePage=false',
+      `userInfo.displayName="${name}"`,
+    ].join('&');
+    return `${url}#${cfg}`;
+  };
+
+  const jitsiUrl = buildJitsiUrl(roomUrl);
+  const remaining = MAX_DURATION - elapsed;
+
+  // ── Loading state ──────────────────────────────────────────────────────
+  if (!jitsiUrl) {
+    return (
+      <View style={styles.loadingContainer}>
+        <StatusBar barStyle="light-content" backgroundColor="#0A0A14" />
+        <ActivityIndicator size="large" color="#4ADE80" />
+        <AppText variant="body" color="rgba(255,255,255,0.6)" style={{ marginTop: spacing.md }}>
+          Setting up your session…
+        </AppText>
+        {patient && (
+          <AppText variant="caption" color="rgba(255,255,255,0.4)" style={{ marginTop: spacing.xs }}>
+            {patient.displayName}
+          </AppText>
+        )}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      {/* Top Info Bar */}
-      <View style={styles.topBar}>
-        <View style={styles.topRow}>
-          <View style={styles.callIndicator}>
-            <View style={styles.liveDot} />
-            <AppText variant="small" color="#4ADE80">{callEnded ? 'Call Ended' : 'In Call'}</AppText>
-          </View>
-          <AppText variant="bodyBold" color={colors.white}>{formatDuration(elapsed)}</AppText>
+      <StatusBar barStyle="light-content" backgroundColor="#0A0A14" />
+
+      {/* ── HUD overlay ──────────────────────────────────────────────── */}
+      <View style={styles.hud}>
+        <View style={styles.hudLeft}>
+          <View style={styles.liveDot} />
+          <AppText variant="small" color="#4ADE80" style={{ marginLeft: 5 }}>In Call</AppText>
         </View>
-        <AppText variant="body" color={colors.white} style={{ marginTop: spacing.xs }}>
-          {patient?.displayName || 'Connecting...'}
-        </AppText>
-        <AppText variant="small" color="rgba(255,255,255,0.5)">
-          {aptType} · {aptTime}
-        </AppText>
+
+        <AppText variant="bodyBold" color={colors.white}>{formatDuration(elapsed)}</AppText>
+
+        <Pressable
+          style={styles.participantBtn}
+          onPress={() => setShowParticipants(v => !v)}
+        >
+          <Feather name="users" size={13} color={colors.white} />
+          <AppText variant="small" color={colors.white} style={{ marginLeft: 4 }}>
+            {participants.length}
+          </AppText>
+        </Pressable>
       </View>
 
-      {/* Remote Video (patient side - placeholder) */}
-      <View style={styles.videoArea}>
-        <Avatar name={patient?.displayName || 'P'} size={110} />
-        <AppText variant="h2" color={colors.white} style={{ marginTop: spacing.lg }}>
-          {patient?.displayName || 'Patient'}
-        </AppText>
-        <AppText variant="caption" color="rgba(255,255,255,0.4)" style={{ marginTop: spacing.xs }}>
-          {patient?.patientCode || ''}
-        </AppText>
-
-        {/* Connection status */}
-        <View style={styles.connectionBadge}>
-          <View style={[styles.connDot, { backgroundColor: '#4ADE80' }]} />
-          <AppText variant="small" color="rgba(255,255,255,0.6)">Connected</AppText>
-        </View>
-      </View>
-
-      {/* Self preview (doctor camera) */}
-      <View style={styles.selfPreview}>
-        <View style={[styles.selfCamera, !isCameraOn && styles.selfCameraOff]}>
-          {isCameraOn ? (
-            <>
-              <Feather name="user" size={20} color="rgba(255,255,255,0.6)" />
-              <AppText variant="small" color="rgba(255,255,255,0.5)">You</AppText>
-            </>
-          ) : (
-            <Feather name="video-off" size={20} color={colors.mediumGrey} />
-          )}
-        </View>
-      </View>
-
-      {/* Recording indicator */}
-      {isRecording && (
-        <View style={styles.recordingBanner}>
-          <Animated.View style={[styles.recDot, { opacity: pulseAnim }]} />
-          <AppText variant="small" color={colors.white}>Recording & Transcribing</AppText>
+      {/* ── 5-min warning ────────────────────────────────────────────── */}
+      {showTimeWarning && remaining > 0 && remaining <= 300 && (
+        <View style={styles.warningBanner}>
+          <Feather name="alert-triangle" size={13} color="#FCD34D" />
+          <AppText variant="small" color="#FCD34D" style={{ marginLeft: 6 }}>
+            {Math.ceil(remaining / 60)} min remaining — session ends at 1 hr
+          </AppText>
         </View>
       )}
 
-      {/* Bottom Controls */}
-      <View style={styles.controlsBar}>
-        <Pressable style={[styles.controlBtn, isMuted && styles.controlBtnActive]} onPress={() => setIsMuted(!isMuted)}>
-          <Feather name={isMuted ? 'mic-off' : 'mic'} size={22} color={colors.white} />
-          <AppText variant="small" color={colors.white} style={styles.controlLabel}>{isMuted ? 'Unmute' : 'Mute'}</AppText>
-        </Pressable>
-
-        <Pressable style={[styles.controlBtn, !isCameraOn && styles.controlBtnActive]} onPress={() => setIsCameraOn(!isCameraOn)}>
-          <Feather name={isCameraOn ? 'video' : 'video-off'} size={22} color={colors.white} />
-          <AppText variant="small" color={colors.white} style={styles.controlLabel}>{isCameraOn ? 'Camera' : 'Off'}</AppText>
-        </Pressable>
-
-        <Pressable style={styles.endCallBtn} onPress={() => setShowEndConfirm(true)}>
-          <Feather name="phone-off" size={24} color={colors.white} />
-        </Pressable>
-
-        <Pressable style={[styles.controlBtn, isRecording && styles.controlBtnRecording]} onPress={toggleRecording}>
-          <Feather name={isRecording ? 'pause-circle' : 'disc'} size={22} color={isRecording ? '#F87171' : colors.white} />
-          <AppText variant="small" color={isRecording ? '#F87171' : colors.white} style={styles.controlLabel}>
-            {isRecording ? 'Stop' : 'Record'}
-          </AppText>
-        </Pressable>
-
-        <Pressable style={[styles.controlBtn, showNotes && styles.controlBtnActive]} onPress={() => setShowNotes(true)}>
-          <Feather name="edit-3" size={22} color={colors.white} />
-          <AppText variant="small" color={colors.white} style={styles.controlLabel}>Notes</AppText>
-        </Pressable>
-      </View>
-
-      {/* ── Notes Panel (slide-up modal) ────────────────────────────── */}
-      <Modal visible={showNotes} animationType="slide" transparent>
-        <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-          <Pressable style={styles.notesOverlay} onPress={() => setShowNotes(false)}>
-            <Pressable style={styles.notesSheet} onPress={e => e.stopPropagation()}>
-              {/* Panel Header */}
-              <View style={styles.notesHeader}>
-                <View>
-                  <AppText variant="h3">Call Notes</AppText>
-                  <AppText variant="small" color={colors.mediumGrey}>
-                    {patient?.displayName || 'Patient'} · {formatDuration(elapsed)}
-                  </AppText>
+      {/* ── Conditional WebView or External Call Dashboard ─────────────────── */}
+      {(() => {
+        const isExternal = liveSession?.platform === 'zoom' || liveSession?.platform === 'meet';
+        if (isExternal) {
+          const platformLabel = liveSession.platform === 'zoom' ? 'Zoom' : 'Google Meet';
+          const platformIcon = liveSession.platform === 'zoom' ? 'video' : 'video';
+          
+          return (
+            <ScrollView style={{ flex: 1 }} contentContainerStyle={styles.externalContainer}>
+              <View style={styles.externalCard}>
+                <View style={styles.externalIconBg}>
+                  <Feather name={platformIcon} size={42} color="#4ADE80" />
                 </View>
-                <Pressable onPress={() => setShowNotes(false)} hitSlop={8}>
-                  <Feather name="x" size={22} color={colors.black} />
-                </Pressable>
-              </View>
+                <AppText variant="h2" color={colors.white} style={{ marginTop: spacing.md, textAlign: 'center' }}>
+                  {platformLabel} Call Active
+                </AppText>
+                <AppText variant="body" color="rgba(255,255,255,0.6)" style={{ marginTop: spacing.sm, textAlign: 'center', paddingHorizontal: spacing.base }}>
+                  This call is hosted externally. Launch {platformLabel} on your device to participate.
+                </AppText>
 
-              <ScrollView showsVerticalScrollIndicator={false} style={{ flex: 1 }}>
-                {/* Transcription Section */}
-                <View style={styles.notesSectionHeader}>
-                  <Feather name="disc" size={14} color={isRecording ? colors.error : colors.mediumGrey} />
-                  <AppText variant="bodyBold" style={{ marginLeft: spacing.xs }}>Transcription</AppText>
-                  {isRecording && (
-                    <View style={styles.liveTag}>
-                      <AppText variant="small" color={colors.white}>LIVE</AppText>
-                    </View>
-                  )}
-                </View>
-
-                {transcription ? (
-                  <View style={styles.transcriptionBox}>
-                    <AppText variant="body" color={colors.darkGrey}>{transcription}</AppText>
-                  </View>
-                ) : (
-                  <View style={styles.transcriptionEmpty}>
-                    <Feather name="mic" size={24} color={colors.lightGrey} />
-                    <AppText variant="body" color={colors.mediumGrey} style={{ marginTop: spacing.sm, textAlign: 'center' }}>
-                      {isRecording
-                        ? 'Listening... Transcription will appear here'
-                        : 'Tap the Record button during the call to start live transcription'
-                      }
-                    </AppText>
-                  </View>
-                )}
-
-                {/* Manual input for transcription (simulated) */}
-                {isRecording && (
-                  <View style={{ marginHorizontal: spacing.base, marginBottom: spacing.md }}>
-                    <TextInput
-                      style={styles.transcriptionInput}
-                      placeholder="Type what is being said..."
-                      placeholderTextColor={colors.lightGrey}
-                      value=""
-                      onChangeText={(text) => {
-                        if (text.endsWith('\n')) {
-                          const line = text.trim();
-                          if (line) {
-                            const updated = transcription
-                              ? `${transcription}\n[${formatDuration(elapsed)}] ${line}`
-                              : `[${formatDuration(elapsed)}] ${line}`;
-                            setTranscription(updated);
-                          }
-                        }
-                      }}
-                      onSubmitEditing={(e) => {
-                        const line = e.nativeEvent.text.trim();
-                        if (line) {
-                          const updated = transcription
-                            ? `${transcription}\n[${formatDuration(elapsed)}] ${line}`
-                            : `[${formatDuration(elapsed)}] ${line}`;
-                          setTranscription(updated);
-                        }
-                      }}
-                      returnKeyType="send"
-                    />
-                    <AppText variant="small" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
-                      Press enter/send to add a transcription entry with timestamp
-                    </AppText>
-                  </View>
-                )}
-
-                <Divider style={{ marginVertical: spacing.sm }} />
-
-                {/* Call Notes Section */}
-                <View style={styles.notesSectionHeader}>
-                  <Feather name="edit-3" size={14} color={colors.navyBlue} />
-                  <AppText variant="bodyBold" style={{ marginLeft: spacing.xs }}>Doctor Notes</AppText>
-                </View>
-
-                <View style={{ paddingHorizontal: spacing.base, paddingBottom: spacing.xxl }}>
-                  <TextInput
-                    style={styles.notesInput}
-                    multiline
-                    textAlignVertical="top"
-                    placeholder="Type your clinical observations, key findings, follow-up items..."
-                    placeholderTextColor={colors.lightGrey}
-                    value={callNotes}
-                    onChangeText={handleNotesChange}
+                <View style={{ gap: spacing.md, marginTop: spacing.xl, width: '100%' }}>
+                  <Button
+                    label="Join External Call"
+                    onPress={() => Linking.openURL(liveSession.roomUrl)}
+                    style={{ backgroundColor: '#22C55E' }}
                   />
-                  <AppText variant="small" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
-                    Notes auto-save during the call
-                  </AppText>
-
-                  {/* Quick note buttons */}
-                  <View style={styles.quickNotes}>
-                    {['Vitals normal', 'Follow-up needed', 'Prescribe medication', 'Refer to specialist', 'Lab work ordered'].map(tag => (
-                      <Pressable
-                        key={tag}
-                        style={styles.quickNoteChip}
-                        onPress={() => {
-                          const prefix = callNotes ? `${callNotes}\n` : '';
-                          handleNotesChange(`${prefix}• ${tag}`);
-                        }}
-                      >
-                        <AppText variant="small" color={colors.navyBlue}>{tag}</AppText>
-                      </Pressable>
-                    ))}
-                  </View>
+                  <Button
+                    label="End Session"
+                    onPress={() => setShowEndConfirm(true)}
+                    style={{ backgroundColor: colors.error }}
+                  />
                 </View>
-              </ScrollView>
-            </Pressable>
-          </Pressable>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* ── End Call Confirmation ────────────────────────────────────── */}
-      <Modal visible={showEndConfirm} transparent animationType="fade">
-        <Pressable style={styles.confirmOverlay} onPress={() => setShowEndConfirm(false)}>
-          <Pressable style={styles.confirmSheet} onPress={e => e.stopPropagation()}>
-            <View style={styles.confirmIconWrap}>
-              <View style={styles.confirmIcon}>
-                <Feather name="phone-off" size={28} color={colors.error} />
               </View>
-            </View>
-            <AppText variant="h2" style={{ textAlign: 'center', marginTop: spacing.md }}>End Call?</AppText>
-            <AppText variant="body" color={colors.darkGrey} style={{ textAlign: 'center', marginTop: spacing.sm }}>
-              This will end the telehealth session with {patient?.displayName || 'the patient'}.
-              Duration: {formatDuration(elapsed)}
-            </AppText>
 
-            {/* Create treatment note toggle */}
-            <Pressable
-              style={styles.noteToggle}
-              onPress={() => setCreateNoteOnEnd(!createNoteOnEnd)}
-            >
-              <View style={[styles.checkbox, createNoteOnEnd && styles.checkboxActive]}>
-                {createNoteOnEnd && <Feather name="check" size={14} color={colors.white} />}
+              {/* Session Notes Panel */}
+              <View style={styles.notesPanel}>
+                <AppText variant="bodyBold" color={colors.white} style={{ marginBottom: spacing.sm }}>
+                  Clinical Session Notes
+                </AppText>
+                <TextInput
+                  style={styles.notesInput}
+                  placeholder="Record patient state, NHIMA logs, or clinical remarks..."
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  value={callNotes}
+                  onChangeText={setCallNotes}
+                  multiline
+                  numberOfLines={5}
+                />
+                
+                <View style={styles.switchRow}>
+                  <AppText variant="small" color="rgba(255,255,255,0.7)" style={{ flex: 1 }}>
+                    Auto-create Clinical Treatment Note
+                  </AppText>
+                  <Switch
+                    value={createTreatmentNote}
+                    onValueChange={setCreateTreatmentNote}
+                    trackColor={{ false: '#767577', true: '#4ADE80' }}
+                    thumbColor={Platform.OS === 'android' ? (createTreatmentNote ? '#22C55E' : '#f4f3f4') : ''}
+                  />
+                </View>
               </View>
-              <AppText variant="body" style={{ flex: 1, marginLeft: spacing.sm }}>
-                Auto-create treatment note from call
-              </AppText>
-            </Pressable>
+            </ScrollView>
+          );
+        }
 
-            {(callNotes || transcription) && (
-              <View style={styles.summaryPreview}>
-                {callNotes && (
-                  <AppText variant="small" color={colors.darkGrey} numberOfLines={2}>
-                    Notes: {callNotes.substring(0, 80)}...
-                  </AppText>
-                )}
-                {transcription && (
-                  <AppText variant="small" color={colors.mediumGrey} numberOfLines={1}>
-                    Transcription: {transcription.split('\n').length} entries
-                  </AppText>
-                )}
+        return (
+          <>
+            <WebView
+              source={{ uri: jitsiUrl }}
+              style={styles.webview}
+              javaScriptEnabled
+              domStorageEnabled
+              allowsInlineMediaPlayback
+              mediaPlaybackRequiresUserAction={false}
+              allowsFullscreenVideo
+              startInLoadingState={false}
+              // Android: grant camera/mic permission inline
+              allowUniversalAccessFromFileURLs
+              mediaCapturePermissionGrantType="grantIfSameHostElsePrompt"
+              onLoadStart={() => setWebviewLoading(true)}
+              onLoadEnd={() => setWebviewLoading(false)}
+              // Intercept Jitsi hangup postMessage to trigger our end-call
+              onMessage={(e) => {
+                try {
+                  const data = JSON.parse(e.nativeEvent.data);
+                  if (data?.action === 'hangup') setShowEndConfirm(true);
+                } catch {}
+              }}
+            />
+
+            {/* WebView loading spinner */}
+            {webviewLoading && (
+              <View style={styles.webviewLoader}>
+                <ActivityIndicator size="small" color="#4ADE80" />
               </View>
             )}
 
-            <View style={{ gap: spacing.sm, marginTop: spacing.lg }}>
-              <Button label="End Call & Save" onPress={handleEndCall} style={{ backgroundColor: colors.error }} />
-              <Pressable style={styles.cancelConfirm} onPress={() => setShowEndConfirm(false)}>
+            {/* ── End call button ──────────────────────────────────────────── */}
+            <View style={styles.endBar}>
+              <Pressable style={styles.endBtn} onPress={() => setShowEndConfirm(true)}>
+                <Feather name="phone-off" size={22} color={colors.white} />
+              </Pressable>
+            </View>
+          </>
+        );
+      })()}
+
+      {/* ── Participants panel ───────────────────────────────────────── */}
+      {showParticipants && (
+        <View style={styles.participantsPanel}>
+          <View style={styles.panelHeader}>
+            <AppText variant="bodyBold">
+              Participants ({participants.length})
+            </AppText>
+            <Pressable onPress={() => setShowParticipants(false)} hitSlop={8}>
+              <Feather name="x" size={18} color={colors.black} />
+            </Pressable>
+          </View>
+          {participants.length === 0 ? (
+            <View style={{ padding: spacing.xl, alignItems: 'center' }}>
+              <Feather name="user-x" size={24} color={colors.lightGrey} />
+              <AppText variant="body" color={colors.mediumGrey} style={{ marginTop: spacing.sm }}>
+                No one else has joined yet
+              </AppText>
+              <AppText variant="small" color={colors.mediumGrey} style={{ textAlign: 'center', marginTop: spacing.xs }}>
+                Invitees will appear here when they join
+              </AppText>
+            </View>
+          ) : (
+            participants.map((p, i) => (
+              <View key={i} style={styles.participantRow}>
+                <Avatar name={p.displayName} size={36} />
+                <View style={{ marginLeft: spacing.md, flex: 1 }}>
+                  <AppText variant="body">{p.displayName}</AppText>
+                  <AppText variant="small" color={colors.mediumGrey}>
+                    Joined {new Date(p.joinedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </AppText>
+                </View>
+                <View style={styles.onlineDot} />
+              </View>
+            ))
+          )}
+        </View>
+      )}
+
+      {/* ── End call confirm ─────────────────────────────────────────── */}
+      <Modal visible={showEndConfirm} transparent animationType="fade">
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmSheet}>
+            <View style={styles.confirmIcon}>
+              <Feather name="phone-off" size={26} color={colors.error} />
+            </View>
+            <AppText variant="h3" style={{ textAlign: 'center', marginTop: spacing.md }}>
+              End Call?
+            </AppText>
+            <AppText variant="body" color={colors.darkGrey} style={{ textAlign: 'center', marginTop: spacing.sm }}>
+              {patient?.displayName || 'Patient'} · {formatDuration(elapsed)}
+            </AppText>
+            <View style={{ gap: spacing.sm, marginTop: spacing.xl }}>
+              <Button
+                label="End Call & Save"
+                onPress={handleEndCall}
+                style={{ backgroundColor: colors.error }}
+              />
+              <Pressable
+                style={{ alignItems: 'center', paddingVertical: spacing.md }}
+                onPress={() => setShowEndConfirm(false)}
+              >
                 <AppText variant="bodyBold" color={colors.navyBlue}>Continue Call</AppText>
               </Pressable>
             </View>
-          </Pressable>
-        </Pressable>
+          </View>
+        </View>
       </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1A1A2E' },
-  topBar: {
-    alignItems: 'center',
-    paddingTop: 60,
-    paddingBottom: spacing.md,
-    paddingHorizontal: spacing.base,
+  container: { flex: 1, backgroundColor: '#0A0A14' },
+  loadingContainer: {
+    flex: 1, backgroundColor: '#0A0A14',
+    alignItems: 'center', justifyContent: 'center',
   },
-  topRow: {
+  webview: { flex: 1 },
+  webviewLoader: {
+    position: 'absolute',
+    top: 100, left: 0, right: 0,
+    alignItems: 'center',
+  },
+
+  // HUD
+  hud: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0,
+    zIndex: 20,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    width: '100%',
+    paddingTop: Platform.OS === 'ios' ? 52 : 36,
+    paddingBottom: spacing.md,
+    paddingHorizontal: spacing.base,
+    backgroundColor: 'rgba(10,10,20,0.75)',
   },
-  callIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(74, 222, 128, 0.15)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-  },
+  hudLeft: { flexDirection: 'row', alignItems: 'center' },
   liveDot: {
     width: 8, height: 8, borderRadius: 4,
     backgroundColor: '#4ADE80',
-    marginRight: spacing.xs,
   },
-  videoArea: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  connectionBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-  },
-  connDot: {
-    width: 6, height: 6, borderRadius: 3,
-    marginRight: spacing.xs,
-  },
-  selfPreview: {
-    position: 'absolute',
-    bottom: 150,
-    right: spacing.base,
-  },
-  selfCamera: {
-    width: 90, height: 120,
-    borderRadius: radius.lg,
-    backgroundColor: '#2A2A3E',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 2,
-    borderColor: 'rgba(255,255,255,0.15)',
-  },
-  selfCameraOff: {
-    backgroundColor: '#1E1E30',
-    borderColor: 'rgba(255,255,255,0.08)',
-  },
-  recordingBanner: {
-    position: 'absolute',
-    top: 120,
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.2)',
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-  },
-  recDot: {
-    width: 8, height: 8, borderRadius: 4,
-    backgroundColor: '#EF4444',
-    marginRight: spacing.sm,
-  },
-  controlsBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingVertical: spacing.xl,
-    paddingBottom: 50,
-    backgroundColor: 'rgba(0,0,0,0.3)',
-  },
-  controlBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: 52, height: 52,
-    borderRadius: 26,
+  participantBtn: {
+    flexDirection: 'row', alignItems: 'center',
     backgroundColor: 'rgba(255,255,255,0.15)',
-  },
-  controlBtnActive: { backgroundColor: 'rgba(255,255,255,0.3)' },
-  controlBtnRecording: { backgroundColor: 'rgba(239, 68, 68, 0.25)' },
-  controlLabel: { marginTop: 2, fontSize: 9 },
-  endCallBtn: {
-    width: 64, height: 64,
-    borderRadius: 32,
-    backgroundColor: colors.error,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingHorizontal: spacing.md, paddingVertical: spacing.xs,
+    borderRadius: radius.full,
   },
 
-  /* Notes Panel */
-  notesOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)', justifyContent: 'flex-end' },
-  notesSheet: {
-    backgroundColor: colors.white,
-    borderTopLeftRadius: radius.xl,
-    borderTopRightRadius: radius.xl,
-    maxHeight: '80%',
-    minHeight: '60%',
-    paddingBottom: spacing.xxl,
+  // Warning
+  warningBanner: {
+    position: 'absolute',
+    zIndex: 20,
+    top: Platform.OS === 'ios' ? 100 : 84,
+    left: 0, right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(251,191,36,0.2)',
+    paddingVertical: spacing.sm,
   },
-  notesHeader: {
+
+  // End bar
+  endBar: {
+    alignItems: 'center',
+    paddingVertical: spacing.base,
+    paddingBottom: Platform.OS === 'ios' ? 36 : spacing.lg,
+    backgroundColor: 'rgba(10,10,20,0.85)',
+  },
+  endBtn: {
+    width: 64, height: 64, borderRadius: 32,
+    backgroundColor: colors.error,
+    alignItems: 'center', justifyContent: 'center',
+  },
+
+  // Participants panel
+  participantsPanel: {
+    position: 'absolute',
+    bottom: 110, left: spacing.base, right: spacing.base,
+    zIndex: 30,
+    backgroundColor: colors.white,
+    borderRadius: radius.xl,
+    maxHeight: 340,
+    overflow: 'hidden',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+  },
+  panelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.base,
+    alignItems: 'center',
+    padding: spacing.base,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.lightGrey,
+  },
+  participantRow: {
+    flexDirection: 'row', alignItems: 'center',
+    padding: spacing.md,
     borderBottomWidth: 1,
     borderBottomColor: colors.offWhite,
   },
-  notesSectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: spacing.base,
-    paddingVertical: spacing.md,
-  },
-  liveTag: {
-    backgroundColor: colors.error,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.sm,
-    marginLeft: spacing.sm,
-  },
-  transcriptionBox: {
-    marginHorizontal: spacing.base,
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    borderWidth: 1,
-    borderColor: colors.lightGrey,
-    maxHeight: 200,
-  },
-  transcriptionEmpty: {
-    alignItems: 'center',
-    paddingVertical: spacing.xl,
-    paddingHorizontal: spacing.xxl,
-  },
-  transcriptionInput: {
-    ...typography.body,
-    color: colors.black,
-    borderWidth: 1,
-    borderColor: colors.lightGrey,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    height: 44,
-  },
-  notesInput: {
-    ...typography.body,
-    color: colors.black,
-    borderWidth: 1.5,
-    borderColor: colors.lightGrey,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    backgroundColor: colors.white,
-    minHeight: 120,
-  },
-  quickNotes: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: spacing.sm,
-    marginTop: spacing.md,
-  },
-  quickNoteChip: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.full,
-    borderWidth: 1,
-    borderColor: colors.navyBlue,
-    backgroundColor: colors.navyLight,
+  onlineDot: {
+    width: 8, height: 8, borderRadius: 4,
+    backgroundColor: '#4ADE80',
   },
 
-  /* End Call Confirmation */
-  confirmOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', alignItems: 'center', padding: spacing.xl },
+  // End confirm
+  confirmOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center', alignItems: 'center',
+    padding: spacing.xl,
+  },
   confirmSheet: {
-    width: '100%',
     backgroundColor: colors.white,
     borderRadius: radius.xl,
     padding: spacing.xl,
-    maxWidth: 360,
+    width: '100%', maxWidth: 340,
+    alignItems: 'center',
   },
-  confirmIconWrap: { alignItems: 'center' },
   confirmIcon: {
-    width: 64, height: 64, borderRadius: 32,
-    backgroundColor: 'rgba(239,68,68,0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noteToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: spacing.lg,
-    padding: spacing.md,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-  },
-  checkbox: {
-    width: 22, height: 22, borderRadius: 6,
-    borderWidth: 2, borderColor: colors.lightGrey,
+    width: 60, height: 60, borderRadius: 30,
+    backgroundColor: 'rgba(201,68,68,0.1)',
     alignItems: 'center', justifyContent: 'center',
   },
-  checkboxActive: {
-    backgroundColor: colors.navyBlue,
-    borderColor: colors.navyBlue,
+
+  // External call dashboard styles
+  externalContainer: {
+    padding: spacing.base,
+    paddingTop: Platform.OS === 'ios' ? 120 : 100,
+    paddingBottom: spacing.xl,
   },
-  summaryPreview: {
-    marginTop: spacing.sm,
-    padding: spacing.md,
-    backgroundColor: colors.offWhite,
-    borderRadius: radius.md,
-  },
-  cancelConfirm: {
+  externalCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: radius.xl,
+    padding: spacing.xl,
     alignItems: 'center',
-    paddingVertical: spacing.md,
+    marginBottom: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  externalIconBg: {
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: 'rgba(74, 222, 128, 0.15)',
+    alignItems: 'center', justifyContent: 'center',
+  },
+  notesPanel: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: radius.xl,
+    padding: spacing.lg,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  notesInput: {
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: radius.md,
+    color: colors.white,
+    padding: spacing.md,
+    height: 120,
+    textAlignVertical: 'top',
+    fontSize: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    marginTop: spacing.xs,
+    marginBottom: spacing.md,
+  },
+  switchRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing.xs,
   },
 });

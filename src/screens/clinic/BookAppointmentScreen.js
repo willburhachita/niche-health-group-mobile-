@@ -120,9 +120,11 @@ const tpStyles = StyleSheet.create({
   footer: { flexDirection: 'row', justifyContent: 'space-between', marginTop: spacing.md, paddingTop: spacing.md, borderTopWidth: 1, borderTopColor: colors.offWhite },
 });
 
-export default function BookAppointmentScreen({ navigation }) {
+export default function BookAppointmentScreen({ route, navigation }) {
   const alert = useAlert();
   const { currentAccount } = useAuth();
+  const preselectedPatientId = route?.params?.patientId;
+
   const [patientSearch, setPatientSearch] = useState('');
   const [selectedPatient, setSelectedPatient] = useState(null);
   const [selectedType, setSelectedType] = useState(null);
@@ -137,8 +139,12 @@ export default function BookAppointmentScreen({ navigation }) {
   const [showAttendeeList, setShowAttendeeList] = useState(false);
   const [location, setLocation] = useState('');
   const [notes, setNotes] = useState('');
+  const [reasonForVisit, setReasonForVisit] = useState('');
   const [sendReminder, setSendReminder] = useState(true);
   const [isRecurring, setIsRecurring] = useState(false);
+  const [recurringDays, setRecurringDays] = useState([]);
+  const [recurringEndDate, setRecurringEndDate] = useState('');
+  const [showRecurDatePicker, setShowRecurDatePicker] = useState(false);
   const [showPatientList, setShowPatientList] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showConsentModal, setShowConsentModal] = useState(false);
@@ -150,14 +156,88 @@ export default function BookAppointmentScreen({ navigation }) {
 
   const searchResults = useQuery(api.patients.search, { query: patientSearch });
   const allPatients = useQuery(api.patients.list, { status: 'active' });
+  const preselectedPatient = useQuery(
+    api.patients.get,
+    preselectedPatientId && !selectedPatient ? { id: preselectedPatientId } : 'skip'
+  );
   const allStaff = useQuery(api.auth.getAllStaffAccounts) ?? [];
   const activeStaff = useMemo(() => allStaff.filter(s => s.isActive), [allStaff]);
   const createAppointment = useMutation(api.appointments.create);
+
+  // Auto-select patient when navigated from patient profile
+  React.useEffect(() => {
+    if (preselectedPatient && !selectedPatient) {
+      setSelectedPatient(preselectedPatient);
+    }
+  }, [preselectedPatient]);
 
   const filteredPatients = useMemo(() =>
     patientSearch.length > 0 ? (searchResults ?? []) : (allPatients ?? []),
     [patientSearch, searchResults, allPatients]
   );
+
+  const calculatedDates = useMemo(() => {
+    if (!isRecurring || !date) return [];
+    const [year, month, day] = date.split('-').map(Number);
+    const startDate = new Date(year, month - 1, day);
+    if (isNaN(startDate.getTime())) return [];
+
+    const dates = [];
+    const daysSet = new Set(recurringDays);
+    if (daysSet.size === 0) return [];
+
+    let currentStart = new Date(startDate);
+    
+    // Find the first matching day of the week
+    let found = false;
+    for (let i = 0; i < 7; i++) {
+      if (daysSet.has(currentStart.getDay())) {
+        found = true;
+        break;
+      }
+      currentStart.setDate(currentStart.getDate() + 1);
+    }
+    if (!found) return [];
+
+    const limitOccurrences = 100;
+    const maxCheckedDays = 365;
+    let count = 0;
+    let daysCheck = 0;
+    
+    let endLimitTime = null;
+    if (recurringEndDate) {
+      const [ey, em, ed] = recurringEndDate.split('-').map(Number);
+      endLimitTime = new Date(ey, em - 1, ed, 23, 59, 59).getTime();
+    }
+    
+    if (endLimitTime && currentStart.getTime() > endLimitTime) {
+      return [];
+    }
+    
+    dates.push(new Date(currentStart));
+    count++;
+
+    while (count < limitOccurrences && daysCheck < maxCheckedDays) {
+      currentStart.setDate(currentStart.getDate() + 1);
+      daysCheck++;
+      
+      if (endLimitTime && currentStart.getTime() > endLimitTime) {
+        break;
+      }
+      
+      if (daysSet.has(currentStart.getDay())) {
+        dates.push(new Date(currentStart));
+        count++;
+      }
+    }
+    return dates;
+  }, [isRecurring, date, recurringDays, recurringEndDate]);
+
+  const formatPreviewDate = (d) => {
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  };
 
   const parseDateTime = () => {
     const [year, month, day] = (date || '').split('-');
@@ -185,6 +265,17 @@ export default function BookAppointmentScreen({ navigation }) {
     }
     try {
       const { startMs, endMs, duration } = parseDateTime();
+      
+      let parsedRecurEnd = undefined;
+      if (isRecurring) {
+        if (recurringEndDate) {
+          const [ry, rm, rd] = recurringEndDate.split('-');
+          parsedRecurEnd = new Date(parseInt(ry), parseInt(rm) - 1, parseInt(rd), 23, 59, 59, 999).getTime();
+        } else {
+          parsedRecurEnd = startMs + 90 * 86400000;
+        }
+      }
+
       await createAppointment({
         patientId: selectedPatient._id,
         providerId: selectedProvider?.userId || currentAccount?.userId || '',
@@ -195,9 +286,11 @@ export default function BookAppointmentScreen({ navigation }) {
         location: location || undefined,
         status: 'pending',
         notes: notes || undefined,
+        reasonForVisit: reasonForVisit || undefined,
         isRecurring,
         recurringPattern: isRecurring ? 'weekly' : undefined,
-        recurringEndDate: isRecurring ? startMs + 90 * 86400000 : undefined,
+        recurringEndDate: parsedRecurEnd,
+        recurringDays: isRecurring && recurringDays.length > 0 ? recurringDays : undefined,
         createdBy: currentAccount?.userId || 'unknown',
       });
       alert({ type: 'success', title: 'Appointment Booked', message: `Appointment for ${selectedPatient.displayName} has been booked.`, buttons: [{ label: 'OK', onPress: () => navigation.goBack() }] });
@@ -404,6 +497,7 @@ export default function BookAppointmentScreen({ navigation }) {
         <Divider type="section" />
 
         {/* Location & Notes */}
+        <Input label="Reason for Visit" placeholder="e.g. Hemodialysis, Consultation" value={reasonForVisit} onChangeText={setReasonForVisit} icon="activity" />
         <Input label="Location" placeholder="e.g. Consultation Room 1" value={location} onChangeText={setLocation} icon="map-pin" />
         <Input label="Notes" placeholder="Any additional notes..." value={notes} onChangeText={setNotes} multiline />
 
@@ -429,11 +523,94 @@ export default function BookAppointmentScreen({ navigation }) {
           </View>
           <Switch
             value={isRecurring}
-            onValueChange={setIsRecurring}
+            onValueChange={(checked) => {
+              setIsRecurring(checked);
+              if (checked && recurringDays.length === 0 && date) {
+                const [year, month, day] = date.split('-').map(Number);
+                const parsedDate = new Date(year, month - 1, day);
+                if (!isNaN(parsedDate.getTime())) {
+                  setRecurringDays([parsedDate.getDay()]);
+                }
+              }
+            }}
             trackColor={{ true: colors.navyBlue, false: colors.lightGrey }}
             thumbColor={colors.white}
           />
         </View>
+
+        {isRecurring && (
+          <View style={styles.recurrenceSection}>
+            <AppText variant="bodyBold" style={[styles.label, { marginTop: 0 }]}>Repeat Weekly On</AppText>
+            <View style={styles.daysRow}>
+              {[
+                { label: 'Sun', value: 0 },
+                { label: 'Mon', value: 1 },
+                { label: 'Tue', value: 2 },
+                { label: 'Wed', value: 3 },
+                { label: 'Thu', value: 4 },
+                { label: 'Fri', value: 5 },
+                { label: 'Sat', value: 6 }
+              ].map(d => {
+                const isSelected = recurringDays.includes(d.value);
+                return (
+                  <Pressable
+                    key={d.value}
+                    style={[styles.dayCircle, isSelected && styles.dayCircleActive]}
+                    onPress={() => {
+                      if (isSelected) {
+                        setRecurringDays(prev => prev.filter(v => v !== d.value));
+                      } else {
+                        setRecurringDays(prev => [...prev, d.value]);
+                      }
+                    }}
+                  >
+                    <AppText variant="caption" color={isSelected ? colors.white : colors.navyBlue}>
+                      {d.label}
+                    </AppText>
+                  </Pressable>
+                );
+              })}
+            </View>
+            
+            <AppText variant="bodyBold" style={[styles.label, { marginTop: spacing.sm }]}>Repeat Until</AppText>
+            <Pressable style={[styles.dateBtn, { marginBottom: 0 }]} onPress={() => setShowRecurDatePicker(true)}>
+              <Feather name="calendar" size={18} color={colors.navyBlue} style={{ marginRight: spacing.sm }} />
+              <AppText variant="body" color={recurringEndDate ? colors.black : colors.mediumGrey} style={{ flex: 1 }}>
+                {recurringEndDate || 'Select end date'}
+              </AppText>
+              <Feather name="chevron-down" size={16} color={colors.mediumGrey} />
+            </Pressable>
+            <CalendarDatePicker
+              visible={showRecurDatePicker}
+              selectedDate={recurringEndDate}
+              onSelect={(d) => { setRecurringEndDate(d); setShowRecurDatePicker(false); }}
+              onClose={() => setShowRecurDatePicker(false)}
+            />
+
+            {calculatedDates.length > 0 && (
+              <View style={styles.previewContainer}>
+                <AppText variant="caption" color={colors.mediumGrey} style={styles.previewTitle}>
+                  CALCULATED APPOINTMENT DATES
+                </AppText>
+                <View style={styles.previewList}>
+                  {calculatedDates.slice(0, 5).map((d, index) => (
+                    <View key={index} style={styles.previewItem}>
+                      <Feather name="calendar" size={12} color={colors.navyBlue} style={{ marginRight: spacing.xs }} />
+                      <AppText variant="small" color={colors.darkGrey}>
+                        {formatPreviewDate(d)}
+                      </AppText>
+                    </View>
+                  ))}
+                  {calculatedDates.length > 5 && (
+                    <AppText variant="small" color={colors.mediumGrey} style={{ fontStyle: 'italic', marginTop: spacing.xs }}>
+                      + {calculatedDates.length - 5} more appointments
+                    </AppText>
+                  )}
+                </View>
+              </View>
+            )}
+          </View>
+        )}
 
         <View style={{ height: spacing.xxl }} />
         <Button label="Book Appointment" onPress={handleSave} />
@@ -646,5 +823,50 @@ const styles = StyleSheet.create({
     paddingVertical: spacing.sm,
     borderRadius: radius.full,
     backgroundColor: colors.navyLight,
+  },
+  recurrenceSection: {
+    padding: spacing.md,
+    backgroundColor: colors.navyLight,
+    borderRadius: radius.md,
+    marginTop: spacing.xs,
+    marginBottom: spacing.base,
+  },
+  daysRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing.xs,
+    marginBottom: spacing.xs,
+  },
+  dayCircle: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.white,
+    borderWidth: 1.5,
+    borderColor: colors.navyBlue,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  dayCircleActive: {
+    backgroundColor: colors.navyBlue,
+  },
+  previewContainer: {
+    marginTop: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.white,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.lightGrey,
+  },
+  previewTitle: {
+    letterSpacing: 0.5,
+    marginBottom: spacing.xs,
+  },
+  previewList: {
+    gap: spacing.xs,
+  },
+  previewItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
 });

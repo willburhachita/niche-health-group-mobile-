@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import { query, mutation } from "./_generated/server";
 import { api } from "./_generated/api";
+import { enforcePermission } from "./utils/permissions";
 
 // ── List all patients (bounded) ─────────────────────────────────────────
 export const list = query({
@@ -8,13 +9,16 @@ export const list = query({
     status: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    let results;
     if (args.status) {
-      return await ctx.db
+      results = await ctx.db
         .query("patients")
         .withIndex("by_status", (q) => q.eq("status", args.status!))
         .take(200);
+    } else {
+      results = await ctx.db.query("patients").take(200);
     }
-    return await ctx.db.query("patients").take(200);
+    return results.filter((p) => !p.isArchived);
   },
 });
 
@@ -89,19 +93,43 @@ export const create = mutation({
     gender: v.string(),
     phone: v.string(),
     email: v.optional(v.string()),
+    address: v.optional(v.string()),
+    nrcNumber: v.optional(v.string()),
+    occupation: v.optional(v.string()),
+    employer: v.optional(v.string()),
+    profileImageUrl: v.optional(v.string()),
     allergies: v.array(v.string()),
     conditions: v.array(v.string()),
     medications: v.array(v.string()),
     bloodType: v.optional(v.string()),
     insuranceProvider: v.optional(v.string()),
     policyNumber: v.optional(v.string()),
+    otherInsuranceProviders: v.optional(v.array(v.object({
+      provider: v.string(),
+      policyNumber: v.optional(v.string()),
+    }))),
     emergencyContactName: v.optional(v.string()),
     emergencyContactPhone: v.optional(v.string()),
     emergencyContactRelationship: v.optional(v.string()),
+    phoneCountryCode: v.optional(v.string()),
+    nhimaMemberNo: v.optional(v.string()),
+    nhimaScheme: v.optional(v.string()),
+    nhimaEmployer: v.optional(v.string()),
+    bankName: v.optional(v.string()),
+    bankAccountName: v.optional(v.string()),
+    bankAccountNumber: v.optional(v.string()),
+    bankBranchCode: v.optional(v.string()),
+    consentPreferences: v.optional(v.object({
+      sms: v.boolean(),
+      email: v.boolean(),
+      phone: v.boolean(),
+    })),
     department: v.string(),
     createdBy: v.string(),
+    medicalAlerts: v.optional(v.array(v.string())),
   },
   handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.createdBy, "createPatient");
     const initials = (args.firstName[0] + args.lastName[0]).toUpperCase();
     const displayName = `${args.firstName} ${args.lastName}`;
     return await ctx.db.insert("patients", {
@@ -111,6 +139,7 @@ export const create = mutation({
       status: "active",
       lastVisit: undefined,
       createdAt: Date.now(),
+      medicalAlerts: args.medicalAlerts ?? [],
     });
   },
 });
@@ -125,20 +154,45 @@ export const update = mutation({
     gender: v.optional(v.string()),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
+    address: v.optional(v.string()),
+    nrcNumber: v.optional(v.string()),
+    occupation: v.optional(v.string()),
+    employer: v.optional(v.string()),
+    profileImageUrl: v.optional(v.string()),
     allergies: v.optional(v.array(v.string())),
     conditions: v.optional(v.array(v.string())),
     medications: v.optional(v.array(v.string())),
     bloodType: v.optional(v.string()),
     insuranceProvider: v.optional(v.string()),
     policyNumber: v.optional(v.string()),
+    otherInsuranceProviders: v.optional(v.array(v.object({
+      provider: v.string(),
+      policyNumber: v.optional(v.string()),
+    }))),
     emergencyContactName: v.optional(v.string()),
     emergencyContactPhone: v.optional(v.string()),
     emergencyContactRelationship: v.optional(v.string()),
+    phoneCountryCode: v.optional(v.string()),
+    nhimaMemberNo: v.optional(v.string()),
+    nhimaScheme: v.optional(v.string()),
+    nhimaEmployer: v.optional(v.string()),
+    bankName: v.optional(v.string()),
+    bankAccountName: v.optional(v.string()),
+    bankAccountNumber: v.optional(v.string()),
+    bankBranchCode: v.optional(v.string()),
+    consentPreferences: v.optional(v.object({
+      sms: v.boolean(),
+      email: v.boolean(),
+      phone: v.boolean(),
+    })),
     department: v.optional(v.string()),
     status: v.optional(v.string()),
+    medicalAlerts: v.optional(v.array(v.string())),
+    updatedBy: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const { id, ...fields } = args;
+    await enforcePermission(ctx.db, args.updatedBy || "admin", "editPatient");
+    const { id, updatedBy, ...fields } = args;
     const existing = await ctx.db.get(id);
     if (!existing) throw new Error("Patient not found");
 
@@ -153,6 +207,45 @@ export const update = mutation({
       updates.initials = (fn[0] + ln[0]).toUpperCase();
     }
     await ctx.db.patch(id, updates);
+  },
+});
+
+// ── Archive patient (soft delete) ───────────────────────────────────────
+export const archive = mutation({
+  args: {
+    id: v.id("patients"),
+    archivedBy: v.string(),
+    archiveReason: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.archivedBy, "archivePatient");
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Patient not found");
+    await ctx.db.patch(args.id, {
+      isArchived: true,
+      archivedBy: args.archivedBy,
+      archivedAt: Date.now(),
+      archiveReason: args.archiveReason,
+    });
+  },
+});
+
+// ── Restore archived patient ────────────────────────────────────────────
+export const restore = mutation({
+  args: { 
+    id: v.id("patients"),
+    restoredBy: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await enforcePermission(ctx.db, args.restoredBy || "admin", "archivePatient");
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Patient not found");
+    await ctx.db.patch(args.id, {
+      isArchived: false,
+      archivedBy: undefined,
+      archivedAt: undefined,
+      archiveReason: undefined,
+    });
   },
 });
 

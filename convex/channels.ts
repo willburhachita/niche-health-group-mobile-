@@ -41,12 +41,26 @@ export const getChannelMessages = query({
       .withIndex("by_channel", (q) => q.eq("channelId", channelId))
       .collect();
     console.log(`[CHAN] getChannelMessages for ${channelId}: returned ${msgs.length} messages`);
+
+    // Resolve sender names
+    const senderIds = [...new Set(msgs.map(m => m.senderId))];
+    const nameMap: Record<string, string> = {};
+    for (const sid of senderIds) {
+      const user = await ctx.db.query("users").withIndex("by_externalId", q => q.eq("externalId", sid)).first();
+      if (user) { nameMap[sid] = user.displayName; continue; }
+      const accByUid = await ctx.db.query("staffAccounts").withIndex("by_userId", q => q.eq("userId", sid)).first();
+      if (accByUid) { nameMap[sid] = accByUid.displayName || accByUid.email; continue; }
+      const accByEmail = await ctx.db.query("staffAccounts").withIndex("by_email", q => q.eq("email", sid)).first();
+      if (accByEmail) nameMap[sid] = accByEmail.displayName || accByEmail.email;
+    }
+
     return await Promise.all(msgs.map(async (msg) => {
+      const senderName = nameMap[msg.senderId] ?? null;
       if ((msg.type === "voice" || msg.type === "file" || msg.type === "image") && msg.fileUrl && !msg.fileUrl.startsWith("http")) {
         const url = await ctx.storage.getUrl(msg.fileUrl as any);
-        return { ...msg, fileUrl: url ?? msg.fileUrl };
+        return { ...msg, senderName, fileUrl: url ?? msg.fileUrl };
       }
-      return msg;
+      return { ...msg, senderName };
     }));
   },
 });

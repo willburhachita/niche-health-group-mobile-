@@ -1,5 +1,5 @@
 import React, { useState, useMemo } from 'react';
-import { View, ScrollView, Pressable, FlatList, StyleSheet } from 'react-native';
+import { View, ScrollView, Pressable, FlatList, StyleSheet, Linking, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useQuery } from 'convex/react';
@@ -22,7 +22,7 @@ function formatCurrency(amount) {
   return `K ${Number(amount).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
 }
 
-const TABS = ['Overview', 'Notes', 'Billing', 'Appointments'];
+const TABS = ['Overview', 'Notes', 'Billing', 'Appointments', 'Forms', 'Letters', 'Cases', 'Recalls', 'Communications'];
 
 const statusBadgeMap = {
   active: { label: 'Active', variant: 'success' },
@@ -82,17 +82,59 @@ export default function PatientProfileScreen({ route, navigation }) {
             <AppText variant="caption" color={colors.mediumGrey}>{patient.email}</AppText>
           </View>
 
+          {/* Medical Alerts HUD */}
+          {patient.medicalAlerts && patient.medicalAlerts.length > 0 && (
+            <View style={styles.medicalAlertsContainer}>
+              <View style={styles.medicalAlertHeader}>
+                <Feather name="alert-triangle" size={14} color={colors.error} />
+                <AppText variant="captionBold" color={colors.error} style={{ marginLeft: spacing.xs }}>
+                  MEDICAL ALERTS
+                </AppText>
+              </View>
+              <View style={styles.medicalAlertsList}>
+                {patient.medicalAlerts.map((alert, index) => (
+                  <View key={index} style={styles.medicalAlertBadge}>
+                    <AppText variant="caption" color={colors.error} style={{ fontWeight: '600' }}>
+                      {alert}
+                    </AppText>
+                  </View>
+                ))}
+              </View>
+            </View>
+          )}
+
           {/* Action Buttons */}
           <View style={styles.actionRow}>
-            <Pressable style={styles.actionBtn}>
+            <Pressable
+              style={styles.actionBtn}
+              onPress={() => {
+                if (!patient.phone) {
+                  Alert.alert('No Phone', 'This patient has no phone number on record.');
+                  return;
+                }
+                Linking.openURL(`tel:${patient.phone}`);
+              }}
+            >
               <Feather name="phone" size={18} color={colors.navyBlue} />
               <AppText variant="small" color={colors.navyBlue}>Call</AppText>
             </Pressable>
-            <Pressable style={styles.actionBtn}>
+            <Pressable
+              style={styles.actionBtn}
+              onPress={() => {
+                if (!patient.phone) {
+                  Alert.alert('No Phone', 'This patient has no phone number on record.');
+                  return;
+                }
+                Linking.openURL(`sms:${patient.phone}`);
+              }}
+            >
               <Feather name="message-circle" size={18} color={colors.navyBlue} />
               <AppText variant="small" color={colors.navyBlue}>SMS</AppText>
             </Pressable>
-            <Pressable style={styles.actionBtn} onPress={() => navigation.navigate('BookAppointment')}>
+            <Pressable
+              style={styles.actionBtn}
+              onPress={() => navigation.navigate('BookAppointment', { patientId: patient._id })}
+            >
               <Feather name="calendar" size={18} color={colors.navyBlue} />
               <AppText variant="small" color={colors.navyBlue}>Book Apt</AppText>
             </Pressable>
@@ -123,6 +165,11 @@ export default function PatientProfileScreen({ route, navigation }) {
         {activeTab === 'Notes' && <NotesTab patientId={patientId} navigation={navigation} />}
         {activeTab === 'Billing' && <BillingTab patientId={patientId} navigation={navigation} />}
         {activeTab === 'Appointments' && <AppointmentsTab patientId={patientId} navigation={navigation} />}
+        {activeTab === 'Forms' && <FormsTab patientId={patientId} />}
+        {activeTab === 'Letters' && <LettersTab patientId={patientId} />}
+        {activeTab === 'Cases' && <CasesTab patientId={patientId} />}
+        {activeTab === 'Recalls' && <RecallsTab patientId={patientId} />}
+        {activeTab === 'Communications' && <CommunicationsTab patientId={patientId} />}
       </ScrollView>
     </SafeAreaView>
   );
@@ -298,6 +345,168 @@ function AppointmentsTab({ patientId, navigation }) {
   );
 }
 
+function FormsTab({ patientId }) {
+  const forms = useQuery(api.patientForms.listByPatient, { patientId }) ?? [];
+  return (
+    <View style={styles.tabContent}>
+      {forms.length === 0 ? (
+        <EmptyState icon="file" title="No Forms" message="No custom forms filed for this patient" />
+      ) : (
+        forms.map(form => (
+          <Card key={form._id} style={{ marginBottom: spacing.sm }}>
+            <View style={styles.noteHeader}>
+              <AppText variant="bodyBold">{form.title}</AppText>
+              <Badge label={form.status} variant={form.status === 'submitted' ? 'success' : 'warning'} />
+            </View>
+            <AppText variant="caption" color={colors.darkGrey} style={{ marginTop: spacing.xs }}>
+              Filed by {form.submittedBy} on {formatDate(form.submittedAt)}
+            </AppText>
+          </Card>
+        ))
+      )}
+    </View>
+  );
+}
+
+function LettersTab({ patientId }) {
+  const letters = useQuery(api.patientLetters.listByPatient, { patientId }) ?? [];
+  return (
+    <View style={styles.tabContent}>
+      {letters.length === 0 ? (
+        <EmptyState icon="mail" title="No Letters" message="No referral or clinical letters sent" />
+      ) : (
+        letters.map(letter => (
+          <Card key={letter._id} style={{ marginBottom: spacing.sm }}>
+            <View style={styles.noteHeader}>
+              <AppText variant="bodyBold">{letter.subject}</AppText>
+              <Badge label={letter.status} variant={letter.status === 'sent' ? 'success' : 'warning'} />
+            </View>
+            <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
+              To: {letter.recipient}
+            </AppText>
+            <AppText variant="caption" color={colors.darkGrey} numberOfLines={2} style={{ marginTop: spacing.xs }}>
+              {letter.body}
+            </AppText>
+            <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
+              Author: {letter.sentBy} · {formatDate(letter.sentAt)}
+            </AppText>
+          </Card>
+        ))
+      )}
+    </View>
+  );
+}
+
+function CasesTab({ patientId }) {
+  const cases = useQuery(api.patientCases.listByPatient, { patientId }) ?? [];
+  return (
+    <View style={styles.tabContent}>
+      {cases.length === 0 ? (
+        <EmptyState icon="folder" title="No Cases" message="No open medical cases/episodes" />
+      ) : (
+        cases.map(item => (
+          <Card key={item._id} style={{ marginBottom: spacing.sm }}>
+            <View style={styles.noteHeader}>
+              <AppText variant="bodyBold">{item.title}</AppText>
+              <Badge label={item.status} variant={item.status === 'open' ? 'success' : 'role'} />
+            </View>
+            {item.description && (
+              <AppText variant="caption" color={colors.darkGrey} style={{ marginTop: spacing.xs }}>
+                {item.description}
+              </AppText>
+            )}
+            <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
+              Opened: {formatDate(item.openedAt)} by {item.openedBy}
+              {item.closedAt && ` · Closed: ${formatDate(item.closedAt)}`}
+            </AppText>
+          </Card>
+        ))
+      )}
+    </View>
+  );
+}
+
+function RecallsTab({ patientId }) {
+  const recalls = useQuery(api.patientRecalls.listByPatient, { patientId }) ?? [];
+  return (
+    <View style={styles.tabContent}>
+      {recalls.length === 0 ? (
+        <EmptyState icon="clock" title="No Recalls" message="No upcoming clinical recalls" />
+      ) : (
+        recalls.map(recall => {
+          const isOverdue = recall.status === 'pending' && recall.dueDate < Date.now();
+          return (
+            <Card key={recall._id} style={{ marginBottom: spacing.sm }}>
+              <View style={styles.noteHeader}>
+                <AppText variant="bodyBold">{recall.recallType}</AppText>
+                <Badge 
+                  label={recall.status} 
+                  variant={recall.status === 'completed' ? 'success' : isOverdue ? 'danger' : 'warning'} 
+                />
+              </View>
+              <AppText variant="caption" color={isOverdue ? colors.error : colors.darkGrey} style={{ marginTop: spacing.xs }}>
+                Due Date: {formatDate(recall.dueDate)} {isOverdue && '(Overdue)'}
+              </AppText>
+              {recall.notes && (
+                <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs, fontStyle: 'italic' }}>
+                  "{recall.notes}"
+                </AppText>
+              )}
+              <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
+                Scheduled by {recall.scheduledBy}
+              </AppText>
+            </Card>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
+function CommunicationsTab({ patientId }) {
+  const comms = useQuery(api.patientCommunications.listByPatient, { patientId }) ?? [];
+  return (
+    <View style={styles.tabContent}>
+      {comms.length === 0 ? (
+        <EmptyState icon="message-square" title="No Communications" message="No contact history logs" />
+      ) : (
+        comms.map(comm => {
+          const isOutbound = comm.direction === 'outbound';
+          return (
+            <Card key={comm._id} style={{ marginBottom: spacing.sm }}>
+              <View style={styles.noteHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: spacing.xs }}>
+                  <Feather 
+                    name={isOutbound ? "arrow-up-right" : "arrow-down-left"} 
+                    size={14} 
+                    color={isOutbound ? colors.navyBlue : colors.success} 
+                  />
+                  <AppText variant="bodyBold">{comm.type}</AppText>
+                </View>
+                <Badge 
+                  label={comm.status} 
+                  variant={comm.status === 'sent' || comm.status === 'delivered' ? 'success' : comm.status === 'failed' ? 'danger' : 'role'} 
+                />
+              </View>
+              {comm.subject && (
+                <AppText variant="captionBold" color={colors.darkGrey} style={{ marginTop: spacing.xs }}>
+                  Subject: {comm.subject}
+                </AppText>
+              )}
+              <AppText variant="caption" color={colors.darkGrey} style={{ marginTop: spacing.xs }}>
+                {comm.message}
+              </AppText>
+              <AppText variant="caption" color={colors.mediumGrey} style={{ marginTop: spacing.xs }}>
+                {isOutbound ? `Sent by ${comm.sentBy}` : 'Inbound call/SMS'} · {formatDate(comm.sentAt)}
+              </AppText>
+            </Card>
+          );
+        })
+      )}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.white },
   header: {
@@ -402,5 +611,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.offWhite,
     borderRadius: radius.md,
     padding: spacing.md,
+  },
+  medicalAlertsContainer: {
+    width: '100%',
+    backgroundColor: colors.error + '0A',
+    borderRadius: radius.md,
+    padding: spacing.sm,
+    borderWidth: 1,
+    borderColor: colors.error + '25',
+    marginVertical: spacing.sm,
+  },
+  medicalAlertHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  medicalAlertsList: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing.xs,
+  },
+  medicalAlertBadge: {
+    backgroundColor: colors.error + '14',
+    paddingHorizontal: spacing.sm,
+    paddingVertical: 2,
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.error + '30',
   },
 });

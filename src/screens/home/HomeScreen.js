@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { View, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -18,6 +18,7 @@ import { formatTimestamp, formatTime } from '../../utils/dateHelpers';
 
 export default function HomeScreen({ navigation }) {
   const { currentAccount } = useAuth();
+  const [todayTs] = useState(() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.getTime(); });
   const conversations = useQuery(api.messages.listConversations) || [];
   const channels = useQuery(api.channels.listChannels) || [];
   const announcements = useQuery(api.announcements.listAnnouncements) || [];
@@ -29,7 +30,7 @@ export default function HomeScreen({ navigation }) {
 
   const todayStats = useQuery(api.appointments.todayStats) ?? { total: 0, pending: 0, confirmed: 0, arrived: 0, completed: 0 };
   const nextAppointment = useQuery(api.appointments.nextAppointmentToday);
-  const todayEvents = useQuery(api.scheduleEvents.listByDate, { date: Date.now() }) ?? [];
+  const todayEvents = useQuery(api.scheduleEvents.listByDate, { date: todayTs }) ?? [];
 
   const recentConvos = [...conversations]
     .filter(c => c.lastMessageAt)

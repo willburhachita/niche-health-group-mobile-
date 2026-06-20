@@ -11,7 +11,8 @@ export const list = query({
         .withIndex("by_category", (q) => q.eq("category", args.category!))
         .take(200);
     }
-    return await ctx.db.query("expenses").order("desc").take(200);
+    const results = await ctx.db.query("expenses").order("desc").take(200);
+    return results.filter((e) => !e.isArchived);
   },
 });
 
@@ -19,7 +20,17 @@ export const list = query({
 export const get = query({
   args: { id: v.id("expenses") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.id);
+    const expense = await ctx.db.get(args.id);
+    if (!expense) return null;
+    
+    const attachments = [];
+    if (expense.attachments) {
+      for (const att of expense.attachments) {
+        const url = await ctx.storage.getUrl(att.storageId);
+        attachments.push({ ...att, url });
+      }
+    }
+    return { ...expense, attachments };
   },
 });
 
@@ -49,6 +60,16 @@ export const create = mutation({
     referenceNumber: v.optional(v.string()),
     notes: v.optional(v.string()),
     createdBy: v.string(),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          fileType: v.string(),
+          size: v.number(),
+          storageId: v.string(),
+        })
+      )
+    ),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("expenses", {
@@ -82,10 +103,31 @@ export const update = mutation({
   },
 });
 
-// ── Delete expense ──────────────────────────────────────────────────────
-export const remove = mutation({
+// ── Archive expense (soft delete) ───────────────────────────────────────
+export const archive = mutation({
+  args: {
+    id: v.id("expenses"),
+    archivedBy: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Expense not found");
+    await ctx.db.patch(args.id, {
+      isArchived: true,
+      archivedBy: args.archivedBy,
+      archivedAt: Date.now(),
+    });
+  },
+});
+
+// ── Restore archived expense ────────────────────────────────────────────
+export const restore = mutation({
   args: { id: v.id("expenses") },
   handler: async (ctx, args) => {
-    await ctx.db.delete(args.id);
+    await ctx.db.patch(args.id, {
+      isArchived: false,
+      archivedBy: undefined,
+      archivedAt: undefined,
+    });
   },
 });

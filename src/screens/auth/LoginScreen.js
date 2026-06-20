@@ -22,22 +22,22 @@ export default function LoginScreen({ navigation }) {
   const handleContinue = async () => {
     setError('');
     setIsChecking(true);
+    const targetEmail = email.trim().toLowerCase();
     try {
-      const account = await convex.query(api.auth.getAccountByEmail, { email: email.trim() });
-      if (!account) {
-        setError('No account found with this email address.');
-        setIsChecking(false);
-        return;
-      }
-      const result = await sendOTPCode({ email: account.email });
+      const result = await sendOTPCode({ email: targetEmail });
       if (!result.success) {
+        if (result.error === 'Account not found') {
+          setIsChecking(false);
+          navigation.navigate('OTP', { email: targetEmail, isNotStaff: true });
+          return;
+        }
         setError(result.error || 'Failed to send verification code. Please try again.');
         setIsChecking(false);
         return;
       }
       setIsChecking(false);
-      navigation.navigate('OTP', { email: account.email });
-    } catch {
+      navigation.navigate('OTP', { email: targetEmail });
+    } catch (e) {
       setError('Something went wrong. Please try again.');
       setIsChecking(false);
     }

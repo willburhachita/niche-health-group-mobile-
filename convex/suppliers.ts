@@ -5,7 +5,8 @@ import { query, mutation } from "./_generated/server";
 export const list = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("suppliers").take(100);
+    const results = await ctx.db.query("suppliers").take(100);
+    return results.filter((s) => !s.isArchived);
   },
 });
 
@@ -39,6 +40,9 @@ export const create = mutation({
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
     address: v.optional(v.string()),
+    city: v.optional(v.string()),
+    region: v.optional(v.string()),
+    country: v.optional(v.string()),
     notes: v.optional(v.string()),
     createdBy: v.string(),
   },
@@ -63,6 +67,9 @@ export const update = mutation({
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
     address: v.optional(v.string()),
+    city: v.optional(v.string()),
+    region: v.optional(v.string()),
+    country: v.optional(v.string()),
     notes: v.optional(v.string()),
     isFrequent: v.optional(v.boolean()),
   },
@@ -73,6 +80,35 @@ export const update = mutation({
       if (value !== undefined) updates[key] = value;
     }
     await ctx.db.patch(id, updates);
+  },
+});
+
+// ── Archive supplier (soft delete) ──────────────────────────────────────
+export const archive = mutation({
+  args: {
+    id: v.id("suppliers"),
+    archivedBy: v.string(),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) throw new Error("Supplier not found");
+    await ctx.db.patch(args.id, {
+      isArchived: true,
+      archivedBy: args.archivedBy,
+      archivedAt: Date.now(),
+    });
+  },
+});
+
+// ── Restore archived supplier ──────────────────────────────────────────
+export const restore = mutation({
+  args: { id: v.id("suppliers") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      isArchived: false,
+      archivedBy: undefined,
+      archivedAt: undefined,
+    });
   },
 });
 

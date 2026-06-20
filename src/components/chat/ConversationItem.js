@@ -4,7 +4,6 @@ import { colors } from '../../constants/colors';
 import { spacing } from '../../constants/spacing';
 import { Avatar } from '../common/Avatar';
 import { AppText } from '../common/AppText';
-import { getUserById } from '../../data/mockUsers';
 import { formatTimestamp } from '../../utils/dateHelpers';
 import { truncate } from '../../utils/formatters';
 
@@ -21,11 +20,10 @@ export const ConversationItem = ({ conversation, currentUserId, onPress }) => {
   const isGroup = conversation.type === 'group';
   const otherMemberId = !isGroup ? conversation.members.find(m => m !== currentUserId) : null;
   const convexDetail = conversation.memberDetails?.find(d => d.id === otherMemberId);
-  const otherMemberMock = !isGroup ? getUserById(otherMemberId) : null;
   const name = isGroup
     ? (conversation.name || 'Group Chat')
-    : (convexDetail?.displayName || otherMemberMock?.displayName || 'Staff Member');
-  const status = convexDetail?.onlineStatus || otherMemberMock?.onlineStatus;
+    : (convexDetail?.displayName || 'Staff Member');
+  const status = convexDetail?.onlineStatus;
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.container, pressed && styles.pressed]}>
