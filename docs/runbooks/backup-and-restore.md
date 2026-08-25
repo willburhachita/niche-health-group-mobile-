@@ -31,60 +31,67 @@ Take a fresh backup **before each phase** of the security work.
 
 ---
 
-## 2. Which deployment am I pointed at?
+## 2. The three deployments
 
-This determines whether any data migration is needed at all.
+This project has three Convex deployments:
+
+| Deployment | Name | Role |
+|---|---|---|
+| `production` | `zany-squirrel-782` | Live data. **Referenced nowhere in this repo.** |
+| `dev/ecobrood` | `robust-rook-737` | Personal dev sandbox |
+| `dev/wilbur-hachita` | `silent-meerkat-382` | Personal dev sandbox |
+
+**The repo is configured to point at a personal dev sandbox, not production:**
+
+- `apps/desktop/.env` → `silent-meerkat-382`
+- `apps/desktop/vite.config.ts:32` → `silent-meerkat-382` **hardcoded as the
+  build fallback**, so it is baked into every desktop build even when `.env`
+  says something else
+- `docs/planning/desktop-app-plan.md:262` → `silent-meerkat-382`
+
+Mobile reads `EXPO_PUBLIC_CONVEX_URL` (`App.js:11`), which is **not set
+anywhere in this repo** — no root `.env`, and `eas.json` has no `env` block.
+It must be supplied by EAS dashboard environment variables or a local `.env`
+at build time. Confirm which deployment the distributed APK actually talks to.
+
+Check which deployment your CLI is currently pointed at before running
+anything:
 
 ```bash
-cat .env.local | grep CONVEX_DEPLOYMENT
+cat .env.local | grep CONVEX_DEPLOYMENT     # or check the Convex dashboard
 ```
 
-- `CONVEX_DEPLOYMENT=prod:silent-meerkat-382` → already production. Nothing
-  to migrate. Create a **separate dev deployment** so nobody develops
-  against live patient data.
-- `CONVEX_DEPLOYMENT=dev:silent-meerkat-382` → the live app has been running
-  on a dev deployment. Data is intact but should be moved to prod (§3).
+> ⚠️ **`npx convex deploy` does NOT copy data.** It deploys *code* to the
+> production deployment. Data only moves via `export` → `import`.
 
-No `.env.local`? Check the Convex dashboard — the deployment is labelled
-Production or Development there.
-
-> ⚠️ **`npx convex deploy` does NOT copy data.** It deploys *code* to a
-> production deployment. Run it against an empty prod and the app will look
-> like it lost everything. Data only moves via `export` → `import`.
-> Do not run `convex deploy` until you know which deployment you are on.
+> ⚠️ **Never point a dev build at production.** Developing against
+> `zany-squirrel-782` puts live patient data at risk from ordinary
+> development mistakes.
 
 ---
 
-## 3. Move data to a new production deployment
+## 3. Repointing the apps at the correct deployment
 
-Only if §2 showed you are on a dev deployment.
-
-```bash
-# 1. Snapshot the current (dev) deployment — this is your rollback
-./scripts/backup.sh
-
-# 2. Deploy code to production (creates it empty)
-npx convex deploy
-
-# 3. Load the data into production
-npx convex import --prod --replace backups/<snapshot>.zip
-```
-
-Then repoint both clients at the new prod URL:
+If the desktop or mobile build is aimed at the wrong deployment, fix the
+config — do **not** move data to match the config.
 
 - `apps/desktop/.env` → `VITE_CONVEX_URL`
-- **`apps/desktop/vite.config.ts:32`** — the old URL is **hardcoded as a
-  fallback** here and gets baked into every build. Changing `.env` alone is
-  not enough.
+- **`apps/desktop/vite.config.ts:32`** — must be changed too, or the
+  hardcoded fallback silently overrides `.env` in packaged builds. Prefer
+  removing the fallback entirely so a missing variable fails loudly instead
+  of quietly connecting to a dev sandbox.
 - Mobile: `EXPO_PUBLIC_CONVEX_URL` in the EAS build environment.
 
-Rebuild and redistribute the Android APK and the desktop installer.
+Rebuild and redistribute the Android APK and the desktop installer after any
+change.
 
-**Before decommissioning the old deployment:**
-- Compare per-table row counts against the snapshot — they must match.
-- Spot-check 5 patients, 5 invoices, 5 treatment notes field by field.
-- Confirm file attachments still open.
-- Keep the old deployment read-only for **at least 30 days**. Do not delete it.
+### If a dev sandbox turns out to hold real patient data
+
+Snapshot it first (`./scripts/backup.sh`), then treat it as an exposure:
+its URL is committed to git and, until the auth work lands, it is
+unauthenticated. Move the records to production only if they are the
+authoritative copy, then purge the sandbox. Do not delete anything until the
+snapshot is verified and the data is confirmed present in production.
 
 ---
 

@@ -16,7 +16,15 @@ This application stores and processes **Protected Health Information (PHI)** —
 
 There is no `convex/auth.config.ts` in the repository. Per Convex's own documented behaviour (`convex/_generated/ai/guidelines.md`, "Authentication guidelines"), without that file `ctx.auth.getUserIdentity()` always returns `null`. Consistent with this, a repo-wide search for `ctx.auth` / `getUserIdentity` across `convex/`, `src/`, and `apps/` returns **zero results**, and the clients use plain `ConvexProvider` (`App.js:11,30`) rather than `ConvexProviderWithAuth`, so no credential is ever transmitted.
 
-The practical consequence: **all 258 Convex queries and mutations are unauthenticated public internet endpoints.** The deployment URL is committed to the repository in `apps/desktop/.env` (`https://silent-meerkat-382.eu-west-1.convex.cloud`). Anyone with that URL and the public `convex` npm client can read and modify the entire database — the whole patient register, every treatment note, all financial records, all staff private messages — with no account, no token, and no login.
+The practical consequence: **all 258 Convex queries and mutations are unauthenticated public internet endpoints.** Anyone with a deployment URL and the public `convex` npm client can read and modify the entire database — the whole patient register, every treatment note, all financial records, all staff private messages — with no account, no token, and no login.
+
+> **Deployment note (added after review).** This project has three Convex deployments: `production` (`zany-squirrel-782`), `dev/ecobrood` (`robust-rook-737`), and `dev/wilbur-hachita` (`silent-meerkat-382`). The URL committed to this repository — in `apps/desktop/.env`, hardcoded again at `apps/desktop/vite.config.ts:32`, and in `docs/planning/desktop-app-plan.md:262` — is **`silent-meerkat-382`, a personal dev sandbox**, not production. The production deployment is referenced nowhere in the repo.
+>
+> This does **not** narrow the findings. Every finding below is a defect in the **code**, so it applies to whichever deployment this code is deployed to — production included. Two consequences follow:
+> 1. **Production runs the same vulnerable code.** Data being safely *stored* in production is not the same as production being *secure*.
+> 2. **A committed dev-sandbox URL is its own exposure** if that sandbox holds real patient data, since the URL is public in git history and the sandbox is equally unauthenticated.
+>
+> Confirm which deployment each shipped client actually talks to. Mobile reads `EXPO_PUBLIC_CONVEX_URL` (`App.js:11`), which is not set anywhere in this repo — no root `.env`, no `env` block in `eas.json` — so it comes from the EAS build environment and must be verified there.
 
 Compounding this, a single public query returns staff records containing **plaintext passwords** and **live OTP codes** (`convex/auth.ts:7-31`, `convex/auth.ts:76-83`), and the role/permission system trusts an **attacker-supplied `email` string** as proof of identity (`convex/utils/permissions.ts:117-171`).
 
