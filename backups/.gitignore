@@ -1,0 +1,10 @@
+# ── NEVER COMMIT BACKUPS ──────────────────────────────────────────────────
+# Snapshots taken from the live deployment contain real patient data:
+# names, dates of birth, NRC numbers, diagnoses, medications, bank account
+# numbers, and staff credentials. Committing one would publish all of it to
+# git history permanently.
+#
+# Ignore everything in this directory except this file itself.
+*
+!.gitignore
+!README.md
