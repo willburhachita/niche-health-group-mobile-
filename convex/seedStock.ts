@@ -1,4 +1,4 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 
 /**
  * Seed stock items into the stockItems table.
@@ -7,7 +7,7 @@ import { mutation } from "./_generated/server";
  *
  * Safe to re-run — it checks each itemCode and skips duplicates.
  */
-export const seedStockItems = mutation({
+export const seedStockItems = internalMutation({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
@@ -384,7 +384,7 @@ export const seedStockItems = mutation({
  * One-off cleanup: remove the incorrectly-inserted 5008-BIB record.
  * Run via:  npx convex run seedStock:removeBibagDuplicate
  */
-export const removeBibagDuplicate = mutation({
+export const removeBibagDuplicate = internalMutation({
   args: {},
   handler: async (ctx) => {
     const item = await ctx.db

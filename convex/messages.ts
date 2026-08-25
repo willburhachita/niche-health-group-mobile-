@@ -1,4 +1,4 @@
-import { query, mutation } from "./_generated/server";
+import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 // ── Queries ────────────────────────────────────────────────────────────
@@ -209,7 +209,9 @@ export const unreadMessagesCount = query({
   },
 });
 
-export const clearAllConversationsAndMessages = mutation({
+// INTERNAL: deletes every conversation and message in the deployment.
+// Not reachable from any client.
+export const clearAllConversationsAndMessages = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log(`[MSG] 🗑️ Clearing all conversations and messages...`);

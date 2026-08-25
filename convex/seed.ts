@@ -1,8 +1,10 @@
-import { mutation } from "./_generated/server";
+import { internalMutation } from "./_generated/server";
 
 // Run once to populate the database with initial data.
-// Call via dashboard: npx convex run seed:seedAll
-export const seedAll = mutation({
+// INTERNAL: seeding must never be reachable from a client. Run from the
+// Convex dashboard or:  npx convex run seed:seedAll
+export const seedAll = internalMutation({
+  args: {},
   handler: async (ctx) => {
     const now = Date.now();
 

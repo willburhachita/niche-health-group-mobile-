@@ -551,7 +551,10 @@ export const deleteStaffAccount = mutation({
 });
 
 // ── Sync users table with staffAccounts (wipe and rebuild) ─────────────
-export const syncUsersWithStaffAccounts = mutation({
+// INTERNAL: destructive (deletes every users row before rebuilding). Not
+// reachable from any client. Run from the Convex dashboard or
+//   npx convex run auth:syncUsersWithStaffAccounts
+export const syncUsersWithStaffAccounts = internalMutation({
   args: {},
   handler: async (ctx) => {
     console.log(`[AUTH] 🔄 Wiping users table and rebuilding from staffAccounts...`);
@@ -591,7 +594,9 @@ export const syncUsersWithStaffAccounts = mutation({
 });
 
 // ── Reset trusted devices for an account (dev utility) ──────────────────
-export const resetTrustedDevices = mutation({
+// INTERNAL: clearing trusted devices is an account-lockout / device-approval
+// bypass primitive. Not reachable from any client.
+export const resetTrustedDevices = internalMutation({
   args: { email: v.string() },
   handler: async (ctx, { email }) => {
     const account = await ctx.db
@@ -606,7 +611,9 @@ export const resetTrustedDevices = mutation({
 });
 
 // ── Clear all device requests (dev utility) ────────────────────────────
-export const clearAllDeviceRequests = mutation({
+// INTERNAL: wipes the pending device-approval queue, which would let an
+// attacker hide their own request from admins. Not reachable from any client.
+export const clearAllDeviceRequests = internalMutation({
   args: {},
   handler: async (ctx) => {
     const all = await ctx.db.query("deviceRequests").collect();
