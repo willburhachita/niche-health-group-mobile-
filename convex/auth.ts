@@ -1,6 +1,39 @@
 import { query, mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { Doc } from "./_generated/dataModel";
 import { enforcePermission } from "./utils/permissions";
+
+// ── Safe projection ────────────────────────────────────────────────────
+// staffAccounts documents hold secrets — `password`, `verificationCode`
+// (the live OTP) and `otpExpiry`. Returning a raw document from a query
+// hands those to the caller. Every function that sends an account to a
+// client MUST pass it through this projection.
+//
+// This is an allowlist on purpose: a field added to the schema later is
+// excluded by default rather than silently leaking.
+export type PublicAccount = ReturnType<typeof publicAccount>;
+
+export function publicAccount(a: Doc<"staffAccounts">) {
+  return {
+    _id: a._id,
+    _creationTime: a._creationTime,
+    userId: a.userId,
+    email: a.email,
+    role: a.role,
+    title: a.title,
+    displayName: a.displayName,
+    fullName: a.fullName,
+    phone: a.phone,
+    isActive: a.isActive,
+    isOnboarded: a.isOnboarded,
+    permissions: a.permissions,
+    // Needed by the mobile client's device check (src/hooks/useAuth.js).
+    // Remove once device trust is enforced server-side — see finding H-01.
+    trustedDevices: a.trustedDevices,
+    createdBy: a.createdBy,
+    createdAt: a.createdAt,
+  };
+}
 
 // ── Queries ────────────────────────────────────────────────────────────
 
@@ -15,7 +48,7 @@ export const getAccountByEmail = query({
       .first();
     if (exact && exact.isActive) {
       console.log(`[AUTH] ✅ Found account (exact match): ${exact.email} | role: ${exact.role} | onboarded: ${exact.isOnboarded}`);
-      return exact;
+      return publicAccount(exact);
     }
     const lower = await ctx.db
       .query("staffAccounts")
@@ -26,7 +59,7 @@ export const getAccountByEmail = query({
     } else {
       console.log(`[AUTH] ❌ No active account found for: ${email}`);
     }
-    return lower && lower.isActive ? lower : null;
+    return lower && lower.isActive ? publicAccount(lower) : null;
   },
 });
 
@@ -69,7 +102,7 @@ export const getStaffByUserId = query({
       .query("staffAccounts")
       .withIndex("by_userId", (q) => q.eq("userId", args.userId))
       .first();
-    return account ?? null;
+    return account ? publicAccount(account) : null;
   },
 });
 
@@ -78,7 +111,7 @@ export const getAllStaffAccounts = query({
   handler: async (ctx) => {
     const accounts = await ctx.db.query("staffAccounts").collect();
     console.log(`[AUTH] getAllStaffAccounts: returned ${accounts.length} accounts`);
-    return accounts;
+    return accounts.map(publicAccount);
   },
 });
 
@@ -217,7 +250,7 @@ export const verifyPassword = mutation({
       return { success: false, error: "Incorrect password" };
     }
     console.log(`[AUTH] ✅ verifyPassword SUCCESS — ${email} (role: ${account.role})`);
-    return { success: true, account };
+    return { success: true, account: publicAccount(account) };
   },
 });
 
@@ -629,7 +662,8 @@ export const clearAllDeviceRequests = internalMutation({
 export const listStaff = query({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("staffAccounts").collect();
+    const accounts = await ctx.db.query("staffAccounts").collect();
+    return accounts.map(publicAccount);
   },
 });
 

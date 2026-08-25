@@ -52,7 +52,10 @@ export default function AdminStaffCredentialsScreen({ navigation }) {
   const handleCopy = async () => {
     const acc = selectedAccountDetails || selectedAccount;
     if (!acc) return;
-    const text = `Email: ${acc.email}\nVerification Code: ${acc.verificationCode}\nPassword: ${acc.password}\nRole: ${ROLES[acc.role]?.label || acc.role}`;
+    // Deliberately excludes password and verification code — the backend no
+    // longer returns them, and copying credentials to the system clipboard
+    // exposed them to every other app on the device.
+    const text = `Email: ${acc.email}\nRole: ${ROLES[acc.role]?.label || acc.role}`;
     await Clipboard.setStringAsync(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
@@ -241,27 +244,19 @@ export default function AdminStaffCredentialsScreen({ navigation }) {
                     <AppText variant="bodyBold" style={styles.credVal}>{selectedAccountDetails.email}</AppText>
                   </Pressable>
                   <Divider />
-                  <Pressable style={styles.credRow} onPress={() => handleCopySingle('Code', selectedAccountDetails.verificationCode)}>
+                  {/* Passwords and one-time codes are no longer retrievable.
+                      The backend no longer returns them to any client — see
+                      convex/auth.ts publicAccount(). Issue a new password
+                      instead of reading the existing one. */}
+                  <View style={styles.credRow}>
                     <View style={styles.credRowHeader}>
-                      <AppText variant="small" color={colors.mediumGrey}>
-                        Verification Code{copiedField === 'Code' && <AppText variant="small" color={colors.success}> (Copied!)</AppText>}
-                      </AppText>
-                      <Feather name="copy" size={12} color={copiedField === 'Code' ? colors.success : colors.mediumGrey} />
+                      <AppText variant="small" color={colors.mediumGrey}>Password &amp; verification code</AppText>
                     </View>
-                    <AppText variant="h3" color={colors.navyBlue} style={styles.credVal}>
-                      {selectedAccountDetails.verificationCode}
+                    <AppText variant="caption" color={colors.mediumGrey} style={styles.credVal}>
+                      Not retrievable. Credentials are private to the account holder.
+                      If this member is locked out, issue them a new password.
                     </AppText>
-                  </Pressable>
-                  <Divider />
-                  <Pressable style={styles.credRow} onPress={() => handleCopySingle('Password', selectedAccountDetails.password)}>
-                    <View style={styles.credRowHeader}>
-                      <AppText variant="small" color={colors.mediumGrey}>
-                        Password{copiedField === 'Password' && <AppText variant="small" color={colors.success}> (Copied!)</AppText>}
-                      </AppText>
-                      <Feather name="copy" size={12} color={copiedField === 'Password' ? colors.success : colors.mediumGrey} />
-                    </View>
-                    <AppText variant="bodyBold" style={styles.credVal}>{selectedAccountDetails.password}</AppText>
-                  </Pressable>
+                  </View>
                   <Divider />
                   <View style={styles.credRow}>
                     <View style={styles.credRowHeader}>
@@ -286,7 +281,7 @@ export default function AdminStaffCredentialsScreen({ navigation }) {
                   <Pressable style={styles.copyBtn} onPress={handleCopy}>
                     <Feather name={copied ? 'check-circle' : 'copy'} size={18} color={copied ? colors.success : colors.navyBlue} />
                     <AppText variant="bodyBold" color={copied ? colors.success : colors.navyBlue} style={{ marginLeft: spacing.sm }}>
-                      {copied ? 'Copied All' : 'Copy All Credentials'}
+                      {copied ? 'Copied' : 'Copy Email & Role'}
                     </AppText>
                   </Pressable>
 

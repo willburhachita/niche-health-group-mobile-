@@ -256,19 +256,13 @@ export default function StaffScreen() {
                   </div>
                   <div>
                     <p className="text-xs text-gray-400">Access Password</p>
+                    {/* Passwords are no longer returned to any client — see
+                        convex/auth.ts publicAccount(). Issue a new password
+                        rather than reading the existing one. */}
                     <div className="flex items-center gap-2 mt-0.5">
-                      <span className="font-mono text-xs text-gray-700 font-semibold bg-white px-2 py-0.5 border border-gray-200 rounded select-all">
-                        {activeRecord.password || '—'}
+                      <span className="text-xs text-gray-500 italic">
+                        Not retrievable — issue a new password if locked out
                       </span>
-                      <button
-                        onClick={async () => {
-                          await navigator.clipboard.writeText(activeRecord.password || '');
-                          alert('Password copied to clipboard!');
-                        }}
-                        className="text-[10px] text-navy hover:underline font-semibold"
-                      >
-                        Copy
-                      </button>
                     </div>
                   </div>
                 </div>
