@@ -35,9 +35,25 @@ const MIME = {
 };
 
 // ── Local HTTP server for the built Vite app ──────────────────────────────────
-function startLocalServer(distPath) {
-  return new Promise((resolve) => {
-    const server = http.createServer((req, res) => {
+// The port is part of the page's origin, and the origin is what localStorage is
+// keyed on. Listening on a random port (`listen(0)`) therefore handed every
+// launch a fresh, empty localStorage — users were signed out every single time
+// they opened the app. Bind a stable port so the session survives a restart,
+// and only fall back to a random one if every candidate is taken.
+const PREFERRED_PORTS = [47823, 47824, 47825, 47826, 47827];
+
+function listenOn(server, port) {
+  return new Promise((resolve, reject) => {
+    const onError = (err) => { server.removeListener('listening', onListening); reject(err); };
+    const onListening = () => { server.removeListener('error', onError); resolve(server.address().port); };
+    server.once('error', onError);
+    server.once('listening', onListening);
+    server.listen(port, '127.0.0.1');
+  });
+}
+
+function createServer(distPath) {
+  return http.createServer((req, res) => {
       try {
         const parsed   = url.parse(req.url || '/');
         let   pathname = decodeURIComponent(parsed.pathname || '/');
@@ -82,13 +98,28 @@ function startLocalServer(distPath) {
       }
     });
 
-    // Listen on a random available port
-    server.listen(0, '127.0.0.1', () => {
-      const port = server.address().port;
+}
+
+async function startLocalServer(distPath) {
+  const server = createServer(distPath);
+
+  for (const candidate of [...PREFERRED_PORTS, 0]) {
+    try {
+      const port = await listenOn(server, candidate);
+      if (candidate === 0) {
+        console.warn(
+          '[NHL Connect] All preferred ports were busy; using a random port. ' +
+          'The saved session will not carry over to the next launch.'
+        );
+      }
       console.log(`[NHL Connect] Local server: http://127.0.0.1:${port}`);
-      resolve({ server, url: `http://127.0.0.1:${port}` });
-    });
-  });
+      return { server, url: `http://127.0.0.1:${port}` };
+    } catch (err) {
+      if (err.code !== 'EADDRINUSE' && err.code !== 'EACCES') throw err;
+    }
+  }
+
+  throw new Error('Could not bind a local port for the app server');
 }
 
 // ── Resolve icon path ─────────────────────────────────────────────────────────
