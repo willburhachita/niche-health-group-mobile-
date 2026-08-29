@@ -3,13 +3,17 @@ import react from '@vitejs/plugin-react';
 import path from 'path';
 import { createRequire } from 'module';
 
+// Alias replacements are string-substituted into module ids, so they need POSIX
+// separators to survive a Windows build (the release runner is windows-latest).
+const posix = (p: string) => p.split(path.sep).join('/');
+
 // The shared Convex codegen lives at the repo root (`../../convex`), outside this
 // package. Bare `convex/*` imports inside those generated files resolve from the
 // root, which only works when the root workspace has its own node_modules
 // installed. Pin them to the copy this app depends on so the build never
 // silently depends on the sibling Expo app's install.
-const convexRoot = path.dirname(
-  createRequire(import.meta.url).resolve('convex/package.json')
+const convexRoot = posix(
+  path.dirname(createRequire(import.meta.url).resolve('convex/package.json'))
 );
 
 export default defineConfig(({ mode }) => {
@@ -31,8 +35,8 @@ export default defineConfig(({ mode }) => {
     ],
     resolve: {
       alias: [
-        { find: /^@\//, replacement: path.resolve(__dirname, './src') + '/' },
-        { find: /^@convex\//, replacement: path.resolve(__dirname, '../../convex') + '/' },
+        { find: /^@\//, replacement: posix(path.resolve(__dirname, './src')) + '/' },
+        { find: /^@convex\//, replacement: posix(path.resolve(__dirname, '../../convex')) + '/' },
         { find: /^convex$/, replacement: convexRoot },
         { find: /^convex\/(.*)$/, replacement: convexRoot + '/$1' },
       ],

@@ -119,6 +119,18 @@ function createSplash() {
   });
   splash.loadFile(path.join(__dirname, 'splash.html'));
   splash.center();
+
+  // Stamp the real version in rather than hardcoding it in splash.html, where
+  // it silently drifts out of step with package.json on every release.
+  splash.webContents.once('did-finish-load', () => {
+    if (splash.isDestroyed()) return;
+    splash.webContents
+      .executeJavaScript(
+        `document.getElementById('version').textContent = ${JSON.stringify('v' + app.getVersion())};`
+      )
+      .catch(() => {});
+  });
+
   return splash;
 }
 
