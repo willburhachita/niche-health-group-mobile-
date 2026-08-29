@@ -1,0 +1,50 @@
+name: Delete a desktop release
+
+# One-shot maintenance workflow: removes a published GitHub Release and its tag.
+#
+# Needed because a release was published from this repository by mistake — the
+# NHL Connect product is built from Niche-Healthcare-Group/niche-health-group-app,
+# not from here, so desktop-v1.0.1 shipped an unrelated and much older build.
+#
+# Requires both the tag name and an explicit "delete" confirmation, so it cannot
+# remove a release by accident.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag of the release to delete (e.g. desktop-v1.0.1)'
+        required: true
+        type: string
+      confirm:
+        description: 'Type "delete" to confirm'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  delete:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Delete the release and its tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          if [ "$CONFIRM" != "delete" ]; then
+            echo "::error::Confirmation input must be exactly \"delete\". Got \"$CONFIRM\". Nothing was removed."
+            exit 1
+          fi
+
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No release found for tag $TAG — nothing to do."
+            exit 0
+          fi
+
+          gh release delete "$TAG" --yes --cleanup-tag
+          echo "Deleted release and tag $TAG"
