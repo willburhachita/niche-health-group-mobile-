@@ -4,12 +4,13 @@ name: Desktop release
 #
 #   - Push a `desktop-v*` tag  -> builds, then publishes a GitHub Release with
 #                                 the installer attached.
-#   - Run manually (Actions ->  -> builds and attaches the installer as a
-#     "Run workflow")             workflow artifact only. Nothing is published.
+#   - Run manually              -> builds and attaches the installer as a
+#     (Actions -> Run workflow)    workflow artifact. Ticking "publish" also
+#                                  tags the commit and publishes the Release.
 #
-# Cutting a release:
-#   1. Merge the change to main and bump "version" in apps/desktop/package.json.
-#   2. git tag desktop-v1.0.1 && git push origin desktop-v1.0.1
+# Cutting a release, either way:
+#   - git tag desktop-v1.0.1 && git push origin desktop-v1.0.1
+#   - or Actions -> Desktop release -> Run workflow -> publish: true
 #
 # The tag version and apps/desktop/package.json must agree — the build fails
 # early if they don't, so a mislabelled installer can't reach testers.
@@ -19,6 +20,11 @@ on:
     tags:
       - 'desktop-v*'
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish a GitHub Release (tags the commit with the version in apps/desktop/package.json)'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -43,16 +49,26 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Check the tag matches package.json
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Work out the release tag
+        id: release
         run: |
-          tag_version="${GITHUB_REF_NAME#desktop-v}"
           pkg_version=$(node -p "require('./package.json').version")
-          if [ "$tag_version" != "$pkg_version" ]; then
-            echo "::error::Tag is $GITHUB_REF_NAME (version $tag_version) but apps/desktop/package.json says $pkg_version."
-            exit 1
+          echo "version=$pkg_version" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag_version="${GITHUB_REF_NAME#desktop-v}"
+            if [ "$tag_version" != "$pkg_version" ]; then
+              echo "::error::Tag is $GITHUB_REF_NAME (version $tag_version) but apps/desktop/package.json says $pkg_version."
+              exit 1
+            fi
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=desktop-v$pkg_version" >> "$GITHUB_OUTPUT"
+            echo "publish=${{ inputs.publish }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "Releasing version $pkg_version"
+
+          echo "Building version $pkg_version"
 
       - name: Run tests
         run: npm test
@@ -73,15 +89,19 @@ jobs:
           retention-days: 30
 
       - name: Publish the GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: steps.release.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
         run: |
-          version="${GITHUB_REF_NAME#desktop-v}"
-          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release upload "$GITHUB_REF_NAME" release/*.exe --clobber
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" release/*.exe --clobber
           else
-            gh release create "$GITHUB_REF_NAME" release/*.exe \
-              --title "NHL Connect $version" \
+            # --target creates the tag when it doesn't exist yet, so a manual
+            # run can cut a release without a tag being pushed first.
+            gh release create "$TAG" release/*.exe \
+              --target "$GITHUB_SHA" \
+              --title "NHL Connect $VERSION" \
               --generate-notes
           fi
