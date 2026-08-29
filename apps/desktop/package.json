@@ -1,6 +1,6 @@
 {
   "name": "nhl-connect-desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "NHL Connect Desktop — Niche Healthcare Limited",
   "main": "electron/main.cjs",
   "private": true,

@@ -1,0 +1,87 @@
+name: Desktop release
+
+# Builds the NHL Connect Windows installer.
+#
+#   - Push a `desktop-v*` tag  -> builds, then publishes a GitHub Release with
+#                                 the installer attached.
+#   - Run manually (Actions ->  -> builds and attaches the installer as a
+#     "Run workflow")             workflow artifact only. Nothing is published.
+#
+# Cutting a release:
+#   1. Merge the change to main and bump "version" in apps/desktop/package.json.
+#   2. git tag desktop-v1.0.1 && git push origin desktop-v1.0.1
+#
+# The tag version and apps/desktop/package.json must agree — the build fails
+# early if they don't, so a mislabelled installer can't reach testers.
+
+on:
+  push:
+    tags:
+      - 'desktop-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: bash
+        working-directory: apps/desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check the tag matches package.json
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          tag_version="${GITHUB_REF_NAME#desktop-v}"
+          pkg_version=$(node -p "require('./package.json').version")
+          if [ "$tag_version" != "$pkg_version" ]; then
+            echo "::error::Tag is $GITHUB_REF_NAME (version $tag_version) but apps/desktop/package.json says $pkg_version."
+            exit 1
+          fi
+          echo "Releasing version $pkg_version"
+
+      - name: Run tests
+        run: npm test
+
+      - name: Build the renderer
+        run: npm run build
+
+      - name: Package the Windows installer
+        run: npx electron-builder --win --x64 --publish never
+
+      - name: Upload the installer as a build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: nhl-connect-windows
+          path: |
+            apps/desktop/release/*.exe
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish the GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#desktop-v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" release/*.exe --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" release/*.exe \
+              --title "NHL Connect $version" \
+              --generate-notes
+          fi

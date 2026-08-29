@@ -5,7 +5,7 @@ import { Plus, FileText, DollarSign, Search, Printer, Edit2, Archive, Receipt, P
 import { Button, Input, Select, Textarea, Modal, Badge, EmptyState, Spinner, Card } from '../../components/ui';
 import { useAuth } from '../../hooks/useAuth';
 import { format } from 'date-fns';
-import { useLocation } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 
 const statusColor: Record<string, 'gray' | 'amber' | 'green' | 'red' | 'blue'> = {
   draft: 'gray', unpaid: 'amber', paid: 'green', overdue: 'red', partial: 'blue', cancelled: 'gray',
@@ -23,6 +23,7 @@ interface LineItem {
 export default function InvoicesScreen() {
   const { account, hasPermission } = useAuth();
   const location = useLocation();
+  const navigate = useNavigate();
   const [filter, setFilter] = useState('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<any>(null);
@@ -47,8 +48,10 @@ export default function InvoicesScreen() {
       const inv = invoices.find((i: any) => i._id === routeSelectedId);
       if (inv) {
         setSelected(inv);
-        // Clean up location state to prevent sticky selection on subsequent navigations
-        window.history.replaceState({}, document.title);
+        // Clean up location state to prevent sticky selection on subsequent
+        // navigations. Go through the router rather than history.replaceState
+        // so the router's own history entry stays in sync.
+        navigate(location.pathname, { replace: true, state: {} });
       }
     }
   }, [location.state?.selectedInvoiceId, invoices]);
