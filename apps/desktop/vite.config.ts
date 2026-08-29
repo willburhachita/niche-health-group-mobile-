@@ -1,6 +1,16 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { createRequire } from 'module';
+
+// The shared Convex codegen lives at the repo root (`../../convex`), outside this
+// package. Bare `convex/*` imports inside those generated files resolve from the
+// root, which only works when the root workspace has its own node_modules
+// installed. Pin them to the copy this app depends on so the build never
+// silently depends on the sibling Expo app's install.
+const convexRoot = path.dirname(
+  createRequire(import.meta.url).resolve('convex/package.json')
+);
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
@@ -20,10 +30,13 @@ export default defineConfig(({ mode }) => {
       },
     ],
     resolve: {
-      alias: {
-        '@': path.resolve(__dirname, './src'),
-        '@convex': path.resolve(__dirname, '../../convex'),
-      },
+      alias: [
+        { find: /^@\//, replacement: path.resolve(__dirname, './src') + '/' },
+        { find: /^@convex\//, replacement: path.resolve(__dirname, '../../convex') + '/' },
+        { find: /^convex$/, replacement: convexRoot },
+        { find: /^convex\/(.*)$/, replacement: convexRoot + '/$1' },
+      ],
+      dedupe: ['react', 'react-dom', 'convex'],
     },
     base: './',
     // Bake env vars into the bundle so packaged Electron can access them

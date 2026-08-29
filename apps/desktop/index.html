@@ -4,10 +4,17 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>NHL Connect</title>
-    <link rel="icon" type="image/png" href="/logo.png" />
+    <link rel="icon" type="image/png" href="./logo.png" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <!-- Replaced by React on mount. Kept so a bundle that never executes
+           still shows something instead of a blank white window. -->
+      <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;
+                  background:#F8F9FC;font-family:'Segoe UI',sans-serif;color:#6B7280;font-size:14px">
+        Loading NHL Connect…
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

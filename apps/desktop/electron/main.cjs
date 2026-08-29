@@ -47,8 +47,21 @@ function startLocalServer(distPath) {
 
         let filePath = path.join(distPath, pathname);
 
-        // SPA fallback — serve index.html for any unknown route
-        if (!fs.existsSync(filePath) || fs.statSync(filePath).isDirectory()) {
+        // Never let a missing asset fall back to index.html: the browser would
+        // receive HTML where it expected a module script and refuse to execute
+        // it, leaving a blank window. Only extensionless/document requests get
+        // the SPA fallback (routing itself lives in the URL hash).
+        const missing =
+          !fs.existsSync(filePath) || fs.statSync(filePath).isDirectory();
+
+        if (missing) {
+          const requestedExt = path.extname(pathname).toLowerCase();
+          if (requestedExt && requestedExt !== '.html') {
+            console.error(`[NHL Connect] Missing asset: ${pathname}`);
+            res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+            res.end(`Not found: ${pathname}`);
+            return;
+          }
           filePath = path.join(distPath, 'index.html');
         }
 
@@ -132,27 +145,74 @@ async function createWindow(splash) {
     show: false,
   });
 
-  // ── Load the app ────────────────────────────────────────────────────────────
-  if (isDev) {
-    await win.loadURL('http://localhost:5173');
-    win.webContents.openDevTools();
-  } else {
-    const distPath = path.join(__dirname, '../dist');
-    const { url: localUrl } = await startLocalServer(distPath);
-    await win.loadURL(localUrl);
-  }
-
-  // ── Show after content ready ────────────────────────────────────────────────
-  win.once('ready-to-show', () => {
+  // ── Reveal the window ───────────────────────────────────────────────────────
+  // Registered BEFORE loadURL: `ready-to-show` can fire while the load promise
+  // is still pending, and a listener attached afterwards misses it entirely —
+  // the window then stays hidden behind the splash for good. `revealWindow` is
+  // idempotent so every path below can call it safely.
+  let revealed = false;
+  const revealWindow = () => {
+    if (revealed || win.isDestroyed()) return;
+    revealed = true;
+    clearTimeout(revealTimer);
     if (splash && !splash.isDestroyed()) splash.destroy();
     win.show();
     win.focus();
-  });
+  };
+
+  // Last-resort backstop: show the window even if neither event ever arrives,
+  // so a stuck load surfaces as a visible (debuggable) window rather than a
+  // splash that never goes away.
+  const revealTimer = setTimeout(revealWindow, 15000);
+
+  win.once('ready-to-show', revealWindow);
+  win.webContents.once('did-finish-load', revealWindow);
 
   // ── Log renderer errors (always visible in production via F12) ──────────────
-  win.webContents.on('did-fail-load', (_e, code, desc, url) => {
-    console.error(`[NHL Connect] Failed to load (${code}): ${desc} — ${url}`);
+  let showedLoadError = false;
+  win.webContents.on('did-fail-load', (_e, code, desc, failedUrl, isMainFrame) => {
+    console.error(`[NHL Connect] Failed to load (${code}): ${desc} — ${failedUrl}`);
+    if (!isMainFrame || showedLoadError) return;
+    showedLoadError = true;
+    // Replace the blank window with something the user can act on.
+    win.loadURL(
+      'data:text/html;charset=utf-8,' +
+        encodeURIComponent(
+          `<body style="margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;
+                        background:#F8F9FC;font-family:'Segoe UI',sans-serif">
+             <div style="max-width:520px;background:#fff;border:1px solid #EDF0F7;border-radius:16px;padding:32px">
+               <h1 style="margin:0;font-size:20px;color:#111827">NHL Connect could not load</h1>
+               <p style="margin:8px 0 0;font-size:14px;color:#6B7280;line-height:1.5">
+                 ${desc} (${code}). Try restarting the app; if it keeps happening, reinstall it.
+               </p>
+             </div>
+           </body>`
+        )
+    );
+    revealWindow();
   });
+
+  // Surface renderer console output in the main-process log, so a packaged
+  // build can be diagnosed from the terminal without opening DevTools.
+  win.webContents.on('console-message', (_e, level, message, line, sourceId) => {
+    if (level >= 2) console.error(`[renderer] ${message} (${sourceId}:${line})`);
+  });
+
+  // ── Load the app ────────────────────────────────────────────────────────────
+  try {
+    if (isDev) {
+      await win.loadURL('http://localhost:5173');
+      win.webContents.openDevTools();
+    } else {
+      const distPath = path.join(__dirname, '../dist');
+      const { url: localUrl } = await startLocalServer(distPath);
+      await win.loadURL(localUrl);
+    }
+  } catch (err) {
+    console.error('[NHL Connect] loadURL failed:', err);
+  }
+
+  revealWindow();
 
   win.webContents.on('render-process-gone', (_e, details) => {
     console.error('[NHL Connect] Renderer crashed:', details.reason);
