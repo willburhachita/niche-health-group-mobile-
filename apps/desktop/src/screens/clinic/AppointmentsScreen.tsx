@@ -147,6 +147,9 @@ export default function AppointmentsScreen() {
   const [existingInvoiceData, setExistingInvoiceData] = useState<any>(null);
   const [showArchiveConfirmModal, setShowArchiveConfirmModal] = useState(false);
   const [hoveredClusterId, setHoveredClusterId] = useState<string | null>(null);
+  // The Multiple Bookings list the open appointment was picked from, so completing it can return there
+  const [returnClusterId, setReturnClusterId] = useState<string | null>(null);
+  const [completing, setCompleting] = useState(false);
 
   // Compute 7 days of the active week based on selectedDate (Starts on Sunday)
   const weekDays = useMemo(() => {
@@ -956,6 +959,7 @@ export default function AppointmentsScreen() {
                               e.stopPropagation();
                               setHoveredClusterId(hoveredClusterId === clusterId ? null : clusterId);
                             } else {
+                              setReturnClusterId(null);
                               setSelected(primaryAppt);
                             }
                           };
@@ -1061,6 +1065,7 @@ export default function AppointmentsScreen() {
                                           key={cAppt._id}
                                           onClick={(e) => {
                                             e.stopPropagation();
+                                            setReturnClusterId(clusterId);
                                             setSelected(cAppt);
                                             setHoveredClusterId(null);
                                           }}
@@ -1250,13 +1255,24 @@ export default function AppointmentsScreen() {
                       className="flex-1" 
                       variant="primary" 
                       icon={<CheckCircle size={14} />}
+                      loading={completing}
                       onClick={async () => { 
-                        await complete({ id: selected._id, updatedBy: account?.email || 'admin' }); 
-                        setSelected((s: any) => ({ ...s, status: 'completed' })); 
-                        showToast('Appointment successfully marked completed.', 'success');
+                        setCompleting(true);
+                        try {
+                          await complete({ id: selected._id, updatedBy: account?.email || 'admin' }); 
+                          // Close the record and drop back to the bookings list it was opened from
+                          setSelected(null);
+                          setHoveredClusterId(returnClusterId);
+                          setReturnClusterId(null);
+                          showToast('Appointment successfully marked completed.', 'success');
+                        } catch (err: any) {
+                          showToast(err?.message || 'Could not complete the appointment.', 'error');
+                        } finally {
+                          setCompleting(false);
+                        }
                       }}
                     >
-                      Complete
+                      {completing ? 'Processing…' : 'Complete'}
                     </Button>
                   )}
                 </div>
